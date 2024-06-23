@@ -1,0 +1,30 @@
+fn GetFizzableAndBuzzable(array)
+{
+	var length = len(array)
+	var fizzableAndBuzzable = [0]
+	
+	for (i = 0; i < length; i + 1)
+	{
+		var item = array[i]
+
+		if (item % 3 == 0 && item % 5 == 0)
+		{
+			fizzableAndBuzzable.append(item)
+		}
+	}
+
+	return fizzableAndBuzzable
+}
+
+var numbers = [1]
+for (i = 2; i <= 100; i + 1)
+{
+	numbers[i] = i
+}
+
+print(stringify(numbers))
+
+var provenNumbers = GetFizzableAndBuzzable(numbers)
+var stringArray = provenNumbers.stringify()
+
+print(stringArray)
