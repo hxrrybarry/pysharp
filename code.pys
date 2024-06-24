@@ -2,7 +2,7 @@
 
 class FizzBuzzer
 {
-	var yay = "yay"
+	var biggestFizzableAndBuzzable = 0
 
 	fn GetFizzableAndBuzzable(array)
 	{
@@ -15,6 +15,11 @@ class FizzBuzzer
 
 			if (item % 3 == 0 && item % 5 == 0)
 			{
+				if (item > biggestFizzableAndBuzzable)
+				{
+					biggestFizzableAndBuzzable = item
+				}
+
 				fizzableAndBuzzable.append(item)
 			}
 		}
@@ -25,7 +30,7 @@ class FizzBuzzer
 
 
 var numbers = [1]
-for (i = 2; i <= 100; i + 1)
+for (i = 2; i <= 30; i + 1)
 {
 	numbers[i] = i
 }
@@ -36,12 +41,19 @@ print(stringify(numbers))
 var fizzle = FizzBuzzer(0)
 
 var provenNumbers = fizzle.GetFizzableAndBuzzable(numbers)
+deref(@numbers)
+
 var stringArray = provenNumbers.stringify()
+deref(@provenNumbers)
 
 // some escape characters added would be great
 print()
 print(stringArray)
+deref(@stringArray)
 
-var yay = fizzle.yay
+var biggest = fizzle.biggestFizzableAndBuzzable
+deref(@fizzle)
+
 print()
-print(yay)
+print(biggest)
+deref(@biggest)

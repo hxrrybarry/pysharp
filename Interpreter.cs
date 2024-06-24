@@ -1,4 +1,5 @@
 ﻿using System.Linq.Dynamic.Core;
+using System.Linq.Expressions;
 
 namespace pysharp;
 
@@ -145,9 +146,12 @@ public class Interpreter
     {
         string variableName = Convert.ToString(args[0]);
 
-        foreach (var scope in scopeStack)
+        foreach (var scope in scopeStack.Reverse())
         {
-            scope.Remove(variableName);
+            if (scope.Remove(variableName))
+            {
+                return true; // Variable found and removed
+            }
         }
 
         throw new Exception($"An error occurred: variable '{variableName}' does not exist.");
@@ -418,7 +422,7 @@ public class Interpreter
                 }
 
                 string functionCode = methodDef.Item2;
-                GetValueOfToken(Interpret(functionCode, null, true), out object result);
+                GetValueOfToken(Interpret(functionCode, null, true, obj), out object result);
 
                 return result;
             }
@@ -504,7 +508,7 @@ public class Interpreter
         {
             trueVariableValue = tokens[1..];
 
-            if (TryGetVariable((string)trueVariableValue, out trueVariableValue)) { return true; }
+            if (TryGetVariable((string)trueVariableValue, out object? _)) { return true; }
 
             throw new Exception($"An error occurred: variable '{trueVariableValue}' does not exist.");
         }
@@ -854,7 +858,7 @@ public class Interpreter
         }
     }
 
-    public string Interpret(string code, Dictionary<string, object?>? tempVariables = null, bool isFromUserFunction = false)
+    public string Interpret(string code, Dictionary<string, object?>? tempVariables = null, bool isFromUserFunction = false, PyObject? passedObj = null)
     {
         if (tempVariables is not null)
         {
@@ -957,33 +961,13 @@ public class Interpreter
                         tokens.Dequeue(); // Skip the '='
                         givenVariableValue = string.Join(' ', tokens);
 
-                        if (key.Contains('.'))
+                        if (!GetValueOfToken(givenVariableValue, out trueVariableValue))
                         {
-                            // Handle setting a property on an object
-                            string objectName = key[..key.IndexOf('.')];
-                            string propertyName = key[(key.IndexOf('.') + 1)..];
-
-                            if (!TryGetVariable(objectName, out object? obj) || obj is not PyObject pyObj)
-                            {
-                                throw new Exception($"Variable '{objectName}' is not an object.");
-                            }
-
-                            if (!GetValueOfToken(givenVariableValue, out trueVariableValue))
-                            {
-                                throw new Exception($"Error parsing value '{givenVariableValue}' for property '{propertyName}' on object '{objectName}'.");
-                            }
-
-                            SetProperty(pyObj, propertyName, trueVariableValue);
+                            throw new Exception($"Error parsing variable type at line: {lineNumber} for variable: '{key}', holding value: '{givenVariableValue}'.");
                         }
-                        else
-                        {
-                            if (!GetValueOfToken(givenVariableValue, out trueVariableValue))
-                            {
-                                throw new Exception($"Error parsing variable type at line: {lineNumber} for variable: '{key}', holding value: '{givenVariableValue}'.");
-                            }
 
-                            SetVariable(key, trueVariableValue);
-                        }
+                        if (passedObj is null) { SetVariable(key, trueVariableValue); }
+                        else { SetProperty(passedObj, key, trueVariableValue); }
                         break;
 
                     // assignment to array at index
@@ -1029,7 +1013,7 @@ public class Interpreter
                             if ((bool)evaluatedExpression)
                             {
                                 EnterScope();
-                                Interpret(scope);
+                                Interpret(scope, passedObj: passedObj);
                                 ExitScope();
                                 // skip any following else if or else blocks
                                 SkipElseIfElseBlocks(ref codeLines, ref lineNumber);
@@ -1064,7 +1048,7 @@ public class Interpreter
                             // we have to evaluate it again every time the loop is called to account for updating variables
                             while ((bool)EvaluateBooleanExpression(expression))
                             {
-                                Interpret(scope);
+                                Interpret(scope, passedObj: passedObj);
                             }
                             ExitScope();
 
@@ -1129,7 +1113,7 @@ public class Interpreter
                         while (cond(current))
                         {
                             SetVariable(forLoopVarName, current);
-                            Interpret(scope);
+                            Interpret(scope, passedObj: passedObj);
                             current = op(current);
                         }
                         ExitScope();
@@ -1167,19 +1151,47 @@ public class Interpreter
                         throw new Exception($"An error has occurred at line: {lineNumber}. The 'return' keyword can only be used from within a function.");
 
                     case string method when method.Contains('.'):
-                        method = string.Join(' ', line);
-
-                        variableName = method[..method.IndexOf('.')];
-                        string methodNameAndArgs = method[(method.IndexOf('.') + 1)..];
-                        string methodName = methodNameAndArgs[..methodNameAndArgs.IndexOf('(')];
-
-                        string[] methodArgs = ParseArguments(methodNameAndArgs[(methodNameAndArgs.IndexOf('(') + 1)..^1]);
-
-                        if (!TryExecuteMethod(variableName, methodName, methodArgs, out object? result))
+                        try
                         {
-                            throw new Exception($"An error has occurred at line: {lineNumber}. The method '{method}' could not be found.");
-                        }
+                            method = string.Join(' ', line);
 
+                            variableName = method[..method.IndexOf('.')];
+                            string methodNameAndArgs = method[(method.IndexOf('.') + 1)..];
+                            string methodName = methodNameAndArgs[..methodNameAndArgs.IndexOf('(')];
+
+                            string[] methodArgs = ParseArguments(methodNameAndArgs[(methodNameAndArgs.IndexOf('(') + 1)..^1]);
+
+                            if (!TryExecuteMethod(variableName, methodName, methodArgs, out object? result))
+                            {
+                                throw new Exception($"An error has occurred at line: {lineNumber}. The method '{method}' could not be found.");
+                            }
+                        }
+                        catch
+                        {
+                            tokens.Dequeue(); // Skip the '='
+
+                            givenVariableValue = tokens.Dequeue();
+
+                            // potentially a naive approach
+                            string classAndMethod = method[..method.IndexOf(' ')];
+
+                            // Handle setting a property on an object
+                            string objectName = classAndMethod[..classAndMethod.IndexOf('.')];
+                            string propertyName = classAndMethod[(classAndMethod.IndexOf('.') + 1)..];
+
+                            if (!TryGetVariable(objectName, out object? obj) || obj is not PyObject pyObj)
+                            {
+                                throw new Exception($"Variable '{objectName}' is not an object.");
+                            }
+
+                            if (!GetValueOfToken(givenVariableValue, out trueVariableValue))
+                            {
+                                throw new Exception($"Error parsing value '{givenVariableValue}' for property '{propertyName}' on object '{objectName}'.");
+                            }
+
+                            SetProperty(pyObj, propertyName, trueVariableValue);
+                        }
+                        
                         break;
 
                     // if all else fails, we attempt to see if the user is referencing a function
