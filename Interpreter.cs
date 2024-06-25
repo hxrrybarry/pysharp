@@ -6,18 +6,26 @@ namespace pysharp;
 /* __Known bugs:__
  * Crashes if a user defined function doesn't have a return (pseudo-fix: simply return 0 or something at the end)
  * Arrays can not be created without at least one element in them (pseudo-fix: initialize with 0 or something)
+ * Else if blocks mustn't be separated by a blank line (yikes) (pseudo-fix: don't do line separation there)
  */
 
-public class ClassDefinition
+public struct ClassDefinition
 {
+    public ClassDefinition(string[] arguments)
+    {
+        Parameters = arguments;
+    }
+
     public Dictionary<string, object?> Properties { get; set; } = new();
     public Dictionary<string, (string[], string)> Methods { get; set; } = new();
+    public string[] Parameters { get; set; }
 }
 
-public class PyObject(ClassDefinition classDef)
+public class DynamicClassInstance(ClassDefinition classDef)
 {
-    public Dictionary<string, object?> Properties { get; set; } = new Dictionary<string, object?>(classDef.Properties);
-    public Dictionary<string, (string[], string)> Methods { get; set; } = new Dictionary<string, (string[], string)>(classDef.Methods);
+    public Dictionary<string, object?> Properties { get; set; } = classDef.Properties;
+    public Dictionary<string, (string[], string)> Methods { get; set; } = classDef.Methods;
+    public string[] Parameters { get; set; } = classDef.Parameters;
 }
 
 public class Interpreter
@@ -31,7 +39,7 @@ public class Interpreter
 
     private readonly Dictionary<string, ClassDefinition> userDefinedClasses = new();
 
-    private void SetProperty(PyObject obj, string propertyName, object value)
+    private static void SetProperty(DynamicClassInstance obj, string propertyName, object value)
     {
         if (obj.Properties.ContainsKey(propertyName))
         {
@@ -43,7 +51,7 @@ public class Interpreter
         }
     }
 
-    private object? GetProperty(PyObject obj, string propertyName)
+    private static object? GetProperty(DynamicClassInstance obj, string propertyName)
     {
         if (obj.Properties.TryGetValue(propertyName, out var value))
         {
@@ -83,10 +91,16 @@ public class Interpreter
 
     private void SetVariable(string key, object? value)
     {
-        if (scopeStack.Count > 0)
+        foreach (var scope in scopeStack.Reverse())
         {
-            scopeStack.Peek()[key] = value;
+            if (scope.ContainsKey(key))
+            {
+                scope[key] = value;
+                return;
+            }
         }
+
+        scopeStack.Peek()[key] = value;
     }
 
     private bool? EvaluateBooleanExpression(string expression)
@@ -187,6 +201,17 @@ public class Interpreter
 
             Thread.Sleep(delay);
             return true;
+        }
+        catch { return null; }
+    }
+
+    private static object? Abs(object[] args)
+    {
+        try
+        {
+            float n = Convert.ToSingle(args[0]);
+
+            return MathF.Abs(n);
         }
         catch { return null; }
     }
@@ -404,7 +429,7 @@ public class Interpreter
         return null;
     }
 
-    private object? InvokeMethod(PyObject obj, string methodName, object[] args)
+    private object? InvokeMethod(DynamicClassInstance obj, string methodName, object[] args)
     {
         if (obj.Methods.TryGetValue(methodName, out var methodDef))
         {
@@ -452,9 +477,21 @@ public class Interpreter
                 args[i] = argValue;
             }
 
-            if (userDefinedClasses.TryGetValue(className, out var classDef))
+            if (userDefinedClasses.TryGetValue(className, out ClassDefinition classDef))
             {
-                trueVariableValue = new PyObject(classDef);
+                DynamicClassInstance dynamicClass = new(classDef);
+
+                // select all properties that need constructing
+                var constructedProperties = classDef.Properties.Where(pair => pair.Value != null && classDef.Parameters.Contains(pair.Value.ToString())).ToDictionary(pair => pair.Key, pair => pair.Value);
+
+                for (int i = 0; i < constructedProperties.Count; i++)
+                {
+                    string key = constructedProperties.ElementAt(i).Key;
+                    dynamicClass.Properties[key] = args[i];
+                }
+
+                trueVariableValue = dynamicClass;
+
                 return true;
             }
         }
@@ -467,7 +504,7 @@ public class Interpreter
                 ? memberNameAndArgs[..memberNameAndArgs.IndexOf('(')]
                 : memberNameAndArgs;
 
-            if (!TryGetVariable(variableName, out object? obj) || obj is not PyObject pyObj)
+            if (!TryGetVariable(variableName, out object? obj) || obj is not DynamicClassInstance pyObj)
             {
                 throw new Exception($"Variable '{variableName}' is not an object.");
             }
@@ -627,6 +664,12 @@ public class Interpreter
                 if (args.Length == 1 && GetValueOfToken(args[0], out value)) { return list.Contains(Convert.ToDouble(value)); }
                 break;
 
+            case "max":
+                return list.Max(item => Convert.ToDouble(item));
+
+            case "min":
+                return list.Min(item => Convert.ToDouble(item));
+
             case "stringify":
                 return Stringify([list]);
         }
@@ -782,6 +825,7 @@ public class Interpreter
             { "print", new Func<object[], object>(Print) },
             { "sleep", new Func<object[], object>(Sleep) },
             { "root", new Func<object[], object>(Root) },
+            { "abs", new Func<object[], object>(Abs) },
             { "sin", new Func<object[], object>(Sin) },
             { "cos", new Func<object[], object>(Cos) },
             { "tan", new Func<object[], object>(Tan) },
@@ -801,11 +845,10 @@ public class Interpreter
     {
         while (codeLines.Count > 0)
         {
-            string nextLine = codeLines.Peek().Trim();
+            string nextLine = codeLines.Dequeue().Trim();
+
             if (nextLine.StartsWith("else if") || nextLine.StartsWith("else"))
             {
-                codeLines.Dequeue(); // Remove the else if / else line
-                                     // Skip the scope
                 ParseCodeInCurlyBraces(ref codeLines, ref lineNumber);
             }
             else
@@ -819,11 +862,10 @@ public class Interpreter
     {
         while (codeLines.Count > 0)
         {
-            string nextLine = codeLines.Peek().Trim();
+            string nextLine = codeLines.Dequeue().Trim();
             if (nextLine.StartsWith("else if"))
             {
-                codeLines.Dequeue(); // Remove the else if line
-                string elseIfInstruction = nextLine[8..].Trim(); // Get the condition
+                string elseIfInstruction = nextLine[8..].Trim();
                 if (elseIfInstruction.Contains('(') && elseIfInstruction.Contains(')'))
                 {
                     string expression = elseIfInstruction[1..^1];
@@ -833,7 +875,7 @@ public class Interpreter
                     {
                         string error = Interpret(scope);
                         if (error != "Code executed successfully.") throw new Exception(error);
-                        // Skip any following else if or else blocks
+
                         SkipElseIfElseBlocks(ref codeLines, ref lineNumber);
                         return;
                     }
@@ -845,7 +887,6 @@ public class Interpreter
             }
             else if (nextLine.StartsWith("else"))
             {
-                codeLines.Dequeue(); // Remove the else line
                 string scope = ParseCodeInCurlyBraces(ref codeLines, ref lineNumber);
                 string error = Interpret(scope);
                 if (error != "Code executed successfully.") throw new Exception(error);
@@ -858,7 +899,7 @@ public class Interpreter
         }
     }
 
-    public string Interpret(string code, Dictionary<string, object?>? tempVariables = null, bool isFromUserFunction = false, PyObject? passedObj = null)
+    public string Interpret(string code, Dictionary<string, object?>? tempVariables = null, bool isFromUserFunction = false, DynamicClassInstance? passedObj = null)
     {
         if (tempVariables is not null)
         {
@@ -896,10 +937,13 @@ public class Interpreter
                     // class declaration
                     // oh boy (i'm tired)
                     case "class":
-                        string className = tokens.Dequeue();
+                        string classNameAndArgs = string.Join(' ', tokens);
+                        string className = classNameAndArgs[..classNameAndArgs.IndexOf('(')];
+                        string[] classArgs = classNameAndArgs[(classNameAndArgs.IndexOf('(') + 1)..classNameAndArgs.IndexOf(')')].Split(',').Select(arg => arg.Trim()).ToArray();
+
                         Queue<string> classScope = new(ParseCodeInCurlyBraces(ref codeLines, ref lineNumber).Split('\n'));
 
-                        ClassDefinition classDef = new();
+                        ClassDefinition classDef = new(classArgs);
                         
                         while (classScope.Count > 0)
                         {
@@ -917,7 +961,13 @@ public class Interpreter
                                     classTokens.Dequeue(); // skip the '='
                                     string propValue = string.Join(' ', classTokens);
 
-                                    if (!GetValueOfToken(propValue, out object? truePropValue))
+                                    object? truePropValue;
+                                    if (classArgs.Contains(propValue))
+                                    {
+                                        truePropValue = propValue;
+                                    }
+
+                                    else if (!GetValueOfToken(propValue, out truePropValue))
                                     {
                                         throw new Exception($"Error parsing property value for '{propName}' in class '{className}'.");
                                     }
@@ -966,8 +1016,8 @@ public class Interpreter
                             throw new Exception($"Error parsing variable type at line: {lineNumber} for variable: '{key}', holding value: '{givenVariableValue}'.");
                         }
 
-                        if (passedObj is null) { SetVariable(key, trueVariableValue); }
-                        else { SetProperty(passedObj, key, trueVariableValue); }
+                        if (passedObj is not null && passedObj.Properties.ContainsKey(key)) { SetProperty(passedObj, key, trueVariableValue); }
+                        else { SetVariable(key, trueVariableValue); }
                         break;
 
                     // assignment to array at index
@@ -1179,7 +1229,7 @@ public class Interpreter
                             string objectName = classAndMethod[..classAndMethod.IndexOf('.')];
                             string propertyName = classAndMethod[(classAndMethod.IndexOf('.') + 1)..];
 
-                            if (!TryGetVariable(objectName, out object? obj) || obj is not PyObject pyObj)
+                            if (!TryGetVariable(objectName, out object? obj) || obj is not DynamicClassInstance pyObj)
                             {
                                 throw new Exception($"Variable '{objectName}' is not an object.");
                             }
@@ -1208,7 +1258,7 @@ public class Interpreter
                         }
 
                         // unrecognized instruction
-                        throw new Exception($"Execution failed at line {lineNumber++}: Unrecognized instruction '{instruction}'.");
+                        throw new Exception($"Execution failed at line {lineNumber}: Unrecognized instruction '{instruction}'.");
                 }
             }
             catch (Exception ex)

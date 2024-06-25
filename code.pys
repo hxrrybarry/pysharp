@@ -1,59 +1,46 @@
-// this is starting to get very overkill
-
-class FizzBuzzer
+class Calculator(numbers)
 {
-	var biggestFizzableAndBuzzable = 0
+	var numbersArray = numbers
 
-	fn GetFizzableAndBuzzable(array)
+	fn Operate(opCode)
 	{
-		var length = len(array)
-		var fizzableAndBuzzable = [0]
-	
-		for (i = 0; i < length; i + 1)
+		var length = len(numbersArray)
+		var result = numbersArray[0]
+		
+		if (opCode == "+")
 		{
-			var item = array[i]
-
-			if (item % 3 == 0 && item % 5 == 0)
+			for (i = 1; i < length; i + 1)
 			{
-				if (item > biggestFizzableAndBuzzable)
-				{
-					biggestFizzableAndBuzzable = item
-				}
-
-				fizzableAndBuzzable.append(item)
+				var n = numbersArray[i]
+				result = result + n
+			}
+		}
+		else if (opCode == "*")
+		{
+			for (i = 1; i < length; i + 1)
+			{
+				var n = numbersArray[i]
+				result = result * n
 			}
 		}
 
-		return fizzableAndBuzzable
+		return result
 	}
 }
 
 
 var numbers = [1]
-for (i = 2; i <= 30; i + 1)
+
+for (i = 1; i < 20; i + 1)
 {
 	numbers[i] = i
 }
 
-print(stringify(numbers))
-
-// minor bug, have to at least pass something in
-var fizzle = FizzBuzzer(0)
-
-var provenNumbers = fizzle.GetFizzableAndBuzzable(numbers)
+var calc = Calculator(numbers)
 deref(@numbers)
 
-var stringArray = provenNumbers.stringify()
-deref(@provenNumbers)
+var result = calc.Operate("+")
+deref(@calc)
 
-// some escape characters added would be great
-print()
-print(stringArray)
-deref(@stringArray)
-
-var biggest = fizzle.biggestFizzableAndBuzzable
-deref(@fizzle)
-
-print()
-print(biggest)
-deref(@biggest)
+print(result)
+deref(@result)
