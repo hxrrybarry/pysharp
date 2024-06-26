@@ -1,5 +1,6 @@
 ﻿using System.Linq.Dynamic.Core;
 using System.Linq.Expressions;
+using System.Net.NetworkInformation;
 
 namespace pysharp;
 
@@ -539,7 +540,7 @@ public class Interpreter
     }
 
 
-    private bool GetValueOfToken(string tokens, out object? trueVariableValue)
+    private bool GetValueOfToken(string tokens, out object? trueVariableValue, DynamicClassInstance? passedObj = null)
     {
         if (tokens.StartsWith('@'))
         {
@@ -553,7 +554,7 @@ public class Interpreter
         if (TryParseVariableValue(tokens, out trueVariableValue)) { return true; }
 
         // else, attempt to get value from function
-        trueVariableValue = GetValueFromFunction(tokens);
+        trueVariableValue = GetValueFromFunction(tokens, passedObj);
         if (trueVariableValue is not null) { return true; }
 
         trueVariableValue = HandleListAssignment(tokens);
@@ -729,7 +730,8 @@ public class Interpreter
         }
     }
 
-    private object? GetValueFromFunction(string line)
+    // also applies to a method for a UD object
+    private object? GetValueFromFunction(string line, DynamicClassInstance? passedObj = null)
     {
         int indexOfOpenBrace = line.IndexOf('(');
         int indexOfCloseBrace = line.IndexOf(')');
@@ -766,6 +768,7 @@ public class Interpreter
             var castedFunction = (Func<object[], object>)function;
             return castedFunction(trueArgs);
         }
+        
         else if (userDefinedFunctions.TryGetValue(referencedFunction, out var userDefinedFunction))
         {
             EnterScope();
@@ -786,6 +789,11 @@ public class Interpreter
             {
                 ExitScope();
             }
+        }
+
+        else if (passedObj is not null && passedObj.Methods.ContainsKey(referencedFunction))
+        {
+            return InvokeMethod(passedObj, referencedFunction, trueArgs);
         }
 
         return null;
@@ -999,7 +1007,7 @@ public class Interpreter
                         tokens.Dequeue();
                         string givenVariableValue = string.Join(' ', tokens);
 
-                        if (!GetValueOfToken(givenVariableValue, out object? trueVariableValue))
+                        if (!GetValueOfToken(givenVariableValue, out object? trueVariableValue, passedObj))
                         {
                             throw new Exception($"Error parsing variable type at line: {lineNumber} for variable: '{variableName}', holding value: '{givenVariableValue}'.");
                         }
@@ -1011,7 +1019,7 @@ public class Interpreter
                         tokens.Dequeue(); // Skip the '='
                         givenVariableValue = string.Join(' ', tokens);
 
-                        if (!GetValueOfToken(givenVariableValue, out trueVariableValue))
+                        if (!GetValueOfToken(givenVariableValue, out trueVariableValue, passedObj))
                         {
                             throw new Exception($"Error parsing variable type at line: {lineNumber} for variable: '{key}', holding value: '{givenVariableValue}'.");
                         }
@@ -1109,68 +1117,68 @@ public class Interpreter
 
                     // for loop
                     case "for":
-                    string forLoopInstruction = string.Join(' ', tokens);
+                        string forLoopInstruction = string.Join(' ', tokens);
 
-                    if (forLoopInstruction.Contains('(') && forLoopInstruction.Contains(')'))
-                    {
-                        string scope = ParseCodeInCurlyBraces(ref codeLines, ref lineNumber);
-
-                        string[] args = forLoopInstruction[1..^1].Split(';').Select(arg => arg.Trim()).ToArray();
-
-                        string[] forLoopVar = args[0].Split(' ');
-                        string forLoopVarName = forLoopVar[0];
-                        string forLoopStart = forLoopVar[2];
-
-                        if (!GetValueOfToken(forLoopStart, out object start))
+                        if (forLoopInstruction.Contains('(') && forLoopInstruction.Contains(')'))
                         {
-                            throw new Exception($"Error parsing for loop arguments at line {lineNumber}.");
+                            string scope = ParseCodeInCurlyBraces(ref codeLines, ref lineNumber);
+
+                            string[] args = forLoopInstruction[1..^1].Split(';').Select(arg => arg.Trim()).ToArray();
+
+                            string[] forLoopVar = args[0].Split(' ');
+                            string forLoopVarName = forLoopVar[0];
+                            string forLoopStart = forLoopVar[2];
+
+                            if (!GetValueOfToken(forLoopStart, out object start))
+                            {
+                                throw new Exception($"Error parsing for loop arguments at line {lineNumber}.");
+                            }
+
+                            string[] forLoopConditions = args[1].Split(' ');
+                            string[] operation = args[2].Split(' ');
+
+                            GetValueOfToken(operation[2], out object? operandObject);
+                            int operand = Convert.ToInt32(operandObject);
+                            string opCode = operation[1];
+                            string condition = forLoopConditions[1];
+                            GetValueOfToken(forLoopConditions[2], out object? conditionObject);
+                            double conditionValue = Convert.ToDouble(conditionObject);
+
+                            var operations = new Dictionary<string, Func<int, int, int>>
+                            {
+                                ["+"] = (x, y) => x + y,
+                                ["-"] = (x, y) => x - y,
+                                ["*"] = (x, y) => x * y,
+                                ["/"] = (x, y) => x / y,
+                            };
+
+                            var conditions = new Dictionary<string, Func<int, double, bool>>
+                            {
+                                ["<"] = (x, y) => x < y,
+                                ["<="] = (x, y) => x <= y,
+                                [">"] = (x, y) => x > y,
+                                [">="] = (x, y) => x >= y,
+                                ["=="] = (x, y) => x == y,
+                                ["!="] = (x, y) => x != y
+                            };
+
+                            int current = Convert.ToInt32(start);
+                            Func<int, int> op = i => operations[opCode](i, operand);
+                            Func<int, bool> cond = i => conditions[condition](i, conditionValue);
+
+                            EnterScope();
+                            SetVariable(forLoopVarName, Convert.ToInt32(start));
+                            while (cond(current))
+                            {
+                                SetVariable(forLoopVarName, current);
+                                Interpret(scope, passedObj: passedObj);
+                                current = op(current);
+                            }
+                            ExitScope();
+                            break;
                         }
 
-                        string[] forLoopConditions = args[1].Split(' ');
-                        string[] operation = args[2].Split(' ');
-
-                        GetValueOfToken(operation[2], out object? operandObject);
-                        int operand = Convert.ToInt32(operandObject);
-                        string opCode = operation[1];
-                        string condition = forLoopConditions[1];
-                        GetValueOfToken(forLoopConditions[2], out object? conditionObject);
-                        double conditionValue = Convert.ToDouble(conditionObject);
-
-                        var operations = new Dictionary<string, Func<int, int, int>>
-                        {
-                            ["+"] = (x, y) => x + y,
-                            ["-"] = (x, y) => x - y,
-                            ["*"] = (x, y) => x * y,
-                            ["/"] = (x, y) => x / y,
-                        };
-
-                        var conditions = new Dictionary<string, Func<int, double, bool>>
-                        {
-                            ["<"] = (x, y) => x < y,
-                            ["<="] = (x, y) => x <= y,
-                            [">"] = (x, y) => x > y,
-                            [">="] = (x, y) => x >= y,
-                            ["=="] = (x, y) => x == y,
-                            ["!="] = (x, y) => x != y
-                        };
-
-                        int current = Convert.ToInt32(start);
-                        Func<int, int> op = i => operations[opCode](i, operand);
-                        Func<int, bool> cond = i => conditions[condition](i, conditionValue);
-
-                        EnterScope();
-                        SetVariable(forLoopVarName, Convert.ToInt32(start));
-                        while (cond(current))
-                        {
-                            SetVariable(forLoopVarName, current);
-                            Interpret(scope, passedObj: passedObj);
-                            current = op(current);
-                        }
-                        ExitScope();
-                        break;
-                    }
-
-                    throw new Exception($"Error parsing braces at line: {lineNumber} during for loop: '{instruction}'.");
+                        throw new Exception($"Error parsing braces at line: {lineNumber} during for loop: '{instruction}'.");
 
                     // user defined function
                     case "fn":
@@ -1211,7 +1219,19 @@ public class Interpreter
 
                             string[] methodArgs = ParseArguments(methodNameAndArgs[(methodNameAndArgs.IndexOf('(') + 1)..^1]);
 
-                            if (!TryExecuteMethod(variableName, methodName, methodArgs, out object? result))
+                            if (TryGetVariable(variableName, out object? potentialObject) && potentialObject is DynamicClassInstance)
+                            {
+                                object[] trueArgs = new object[methodArgs.Length];
+
+                                for (int i = 0; i < methodArgs.Length; i++)
+                                {
+                                    if (!GetValueOfToken(methodArgs[i], out trueArgs[i])) { throw new Exception($"An error has occurred at line: {lineNumber}. The method '{method}' could not be found."); }
+                                }
+
+                                InvokeMethod((DynamicClassInstance)potentialObject, methodName, trueArgs);
+                            }
+
+                            else if (!TryExecuteMethod(variableName, methodName, methodArgs, out object? result))
                             {
                                 throw new Exception($"An error has occurred at line: {lineNumber}. The method '{method}' could not be found.");
                             }
@@ -1234,7 +1254,7 @@ public class Interpreter
                                 throw new Exception($"Variable '{objectName}' is not an object.");
                             }
 
-                            if (!GetValueOfToken(givenVariableValue, out trueVariableValue))
+                            else if (!GetValueOfToken(givenVariableValue, out trueVariableValue))
                             {
                                 throw new Exception($"Error parsing value '{givenVariableValue}' for property '{propertyName}' on object '{objectName}'.");
                             }
@@ -1249,7 +1269,7 @@ public class Interpreter
                         if (line.Contains('(') && line.Contains(')'))
                         {
                             // a return type of null signifies that something went wrong with processing
-                            if (GetValueFromFunction(line) is null)
+                            if (GetValueFromFunction(line, passedObj) is null)
                             {
                                 throw new Exception($"Error parsing function name or arguments at line {lineNumber}.");
                             }

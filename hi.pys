@@ -1,0 +1,23 @@
+class Test(a, b, c)
+{
+	var x = a
+	var y = b
+	var z = c
+
+	fn DoSomething(crack)
+	{
+		print(crack)
+		return 0
+	}
+
+	fn DoSomethingElse(cocaine)
+	{
+		DoSomething(cocaine)
+		return 0
+	}
+}
+
+
+var hi = Test(1, 2, 3)
+
+hi.DoSomethingElse("test")
