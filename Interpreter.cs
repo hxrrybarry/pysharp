@@ -1,25 +1,19 @@
 ﻿using System.Linq.Dynamic.Core;
-using System.Linq.Expressions;
-using System.Net.NetworkInformation;
+using System.Text.RegularExpressions;
+using Microsoft.VisualBasic.CompilerServices;
 
 namespace pysharp;
 
 /* __Known bugs:__
  * Crashes if a user defined function doesn't have a return (pseudo-fix: simply return 0 or something at the end)
- * Arrays can not be created without at least one element in them (pseudo-fix: initialize with 0 or something)
  * Else if blocks mustn't be separated by a blank line (yikes) (pseudo-fix: don't do line separation there)
  */
 
-public struct ClassDefinition
+public struct ClassDefinition(string[] arguments)
 {
-    public ClassDefinition(string[] arguments)
-    {
-        Parameters = arguments;
-    }
-
     public Dictionary<string, object?> Properties { get; set; } = new();
     public Dictionary<string, (string[], string)> Methods { get; set; } = new();
-    public string[] Parameters { get; set; }
+    public string[] Parameters { get; set; } = arguments;
 }
 
 public class DynamicClassInstance(ClassDefinition classDef)
@@ -31,7 +25,7 @@ public class DynamicClassInstance(ClassDefinition classDef)
 
 public class Interpreter
 {
-    // due to the variables dict being non static, it means that the current architecture won't properly allow for scoping
+    // due to the variables dict being non-static, it means that the current architecture won't properly allow for scoping
     private readonly Stack<Dictionary<string, object?>> scopeStack = new();
     private Dictionary<string, Delegate> inbuiltFunctions = new();
 
@@ -39,27 +33,7 @@ public class Interpreter
     private readonly Dictionary<string, (string[], string)> userDefinedFunctions = new();
 
     private readonly Dictionary<string, ClassDefinition> userDefinedClasses = new();
-
-    private static void SetProperty(DynamicClassInstance obj, string propertyName, object value)
-    {
-        if (obj.Properties.ContainsKey(propertyName))
-        {
-            obj.Properties[propertyName] = value;
-        }
-        else
-        {
-            throw new Exception($"Property {propertyName} not found on object.");
-        }
-    }
-
-    private static object? GetProperty(DynamicClassInstance obj, string propertyName)
-    {
-        if (obj.Properties.TryGetValue(propertyName, out var value))
-        {
-            return value;
-        }
-        throw new Exception($"Property {propertyName} not found on object.");
-    }
+    
 
     public Interpreter()
     {
@@ -144,19 +118,27 @@ public class Interpreter
 
             return Convert.ToDouble(expression.Evaluate());
         }
-        catch { return null; }
+        catch
+        {
+            return null;
+        }
     }
-
-
-    #region Inbuilt Functions
-    private static object Print(object[] args)
+    
+    #region Non-Static Inbuilts
+    private object? Input(object[] args)
     {
-        string text = Convert.ToString(args[0]);
+        string prompt = Convert.ToString(args[0]);
+        Console.Write(prompt);
 
-        Console.WriteLine(text);
-        return true;
+        string userInput = Console.ReadLine();
+        if (!TryParseVariableValue(userInput, out object? value))
+        {
+            value = userInput;
+        }
+
+        return value;
     }
-
+    
     private object Dereference(object[] args)
     {
         string variableName = Convert.ToString(args[0]);
@@ -171,204 +153,50 @@ public class Interpreter
 
         throw new Exception($"An error occurred: variable '{variableName}' does not exist.");
     }
-
-    private static object Stringify(object[] args)
-    {
-        object trueValue = args[0];
-        string stringValue = trueValue.ToString();
-
-        if (trueValue.GetType() == typeof(List<object>))
-        {
-            List<object> array = (List<object>)trueValue;
-            stringValue = '[' + string.Join(", ", array.Select(x => x.ToString()).ToArray()) + ']';
-        }
-
-        return stringValue;
-    }
-
-    private static object? Sleep(object[] args)
-    {
-        try
-        {
-            int delay = (int)args[0];
-            string factor = (string)args[1];
-            switch (factor)
-            {
-                case "s": delay *= 1000; break;
-                case "m": delay *= 60_000; break;
-                case "h": delay *= 3_600_000; break;
-                default: break;
-            }
-
-            Thread.Sleep(delay);
-            return true;
-        }
-        catch { return null; }
-    }
-
-    private static object? Abs(object[] args)
-    {
-        try
-        {
-            float n = Convert.ToSingle(args[0]);
-
-            return MathF.Abs(n);
-        }
-        catch { return null; }
-    }
-
-    private static object? Root(object[] args)
-    {
-        try
-        {
-            float x = Convert.ToSingle(args[0]);
-            float n = Convert.ToSingle(args[1]);
-
-            return MathF.Pow(x, 1 / n);
-        }
-        catch { return null; }
-    }
-
-    private static object? Sin(object[] args)
-    {
-        try
-        {
-            float n = Convert.ToSingle(args[0]);
-            return MathF.Sin(n);
-        }
-        catch { return null; }
-    }
-
-    private static object? Cos(object[] args)
-    {
-        try
-        {
-            float n = Convert.ToSingle(args[0]);
-            return MathF.Cos(n);
-        }
-        catch { return null; }
-    }
-    private static object? Tan(object[] args)
-    {
-        try
-        {
-            float n = Convert.ToSingle(args[0]);
-            return MathF.Tan(n);
-        }
-        catch { return null; }
-    }
-
-    private static object? Asin(object[] args)
-    {
-        try
-        {
-            float n = Convert.ToSingle(args[0]);
-            return MathF.Asin(n);
-        }
-        catch { return null; }
-    }
-
-    private static object? Acos(object[] args)
-    {
-        try
-        {
-            float n = Convert.ToSingle(args[0]);
-            return MathF.Acos(n);
-        }
-        catch { return null; }
-    }
-
-    private static object? Atan(object[] args)
-    {
-        try
-        {
-            float n = Convert.ToSingle(args[0]);
-            return MathF.Atan(n);
-        }
-        catch { return null; }
-    }
-
-    private object? Input(object[] args)
-    {
-        string prompt = Convert.ToString(args[0]);
-        Console.Write(prompt);
-
-        string userInput = Console.ReadLine();
-        if (!TryParseVariableValue(userInput, out object? value))
-        {
-            value = userInput;
-        }
-
-        return value;
-    }
-
-    private object? Length(object[] args)
-    {
-        object trueValue = args[0];
-
-        if (trueValue is List<object>)
-        {
-            List<object> list = trueValue as List<object>;
-            return list.Count;
-        }
-
-        return Convert.ToString(trueValue).Length;
-    }
-
-    private object? ReadFile(object[] args)
-    {
-        string path = Convert.ToString(args[0]);
-
-        if (File.Exists(path)) { return File.ReadAllText(path); }
-
-        throw new Exception($"Error: file '{path}' does not exist.");
-    }
-
-    private object WriteFile(object[] args)
-    {
-        string path = Convert.ToString(args[0]);
-        string text = Convert.ToString(args[1]);
-
-        File.WriteAllText(path, text);
-        return true;
-    }
     #endregion
 
     #region String Handling
-    private static bool IsString(string input)
-    {
-        return (input.StartsWith('"') || input.StartsWith("f\"")) && input.EndsWith('"');
-    }
+    private static bool IsString(string input) => (input.StartsWith('"') || input.StartsWith("f\"")) && input.EndsWith('"');
 
     private string FormatString(string input)
     {
-        if (input.StartsWith('"'))
-        {
-            return input.TrimStart('"').Trim('\"');
-        }
-        else
-        {
-            // Remove the leading 'f' and the quotes
-            input = input.TrimStart('f').Trim('\"');
+        input = ReplaceEscapeCharacters(input);
 
-            // Find and replace all placeholders with their corresponding values from the current scope
+        return input.StartsWith('"') ? input.Trim('"') : ReplacePlaceholders(input.TrimStart('f').Trim('"'));
+    }
+
+    private string ReplaceEscapeCharacters(string input)
+    {
+        return input.Replace("\\n", "\n")
+            .Replace("\\t", "\t")
+            .Replace("\\r", "\r");
+    }
+
+    private string ReplacePlaceholders(string input)
+    {
+        return Regex.Replace(input, @"\{(\w+)\}", match =>
+        {
+            string key = match.Groups[1].Value;
             foreach (var scope in scopeStack.Reverse())
             {
-                foreach (var variable in scope)
+                if (scope.TryGetValue(key, out var value))
                 {
-                    string value = variable.Value.ToString();
-
-                    if (variable.Value is List<object> array)
-                    {
-                        value = '[' + string.Join(", ", array.Select(x => x.ToString()).ToArray()) + ']';
-                    }
-
-                    input = input.Replace($"{{{variable.Key}}}", value);
+                    return FormatValue(value);
                 }
             }
+            return match.Value; // Keep original if not found
+        });
+    }
 
-            return input;
-        }
+    private string? FormatValue(object value)
+    {
+        return value switch
+        {
+            Dictionary<object, object> dict when !(value is string) => '{' + string.Join(", ", dict.Select(kv => $"{kv.Key}: {kv.Value}")) + '}',
+            // IEnumerable because I may add others in the future
+            IEnumerable<object> enumerable when !(value is string) => "[" + string.Join(", ", enumerable.Select( x => x?.ToString() ?? "null")) + "]",
+            _ => value.ToString()
+        };
     }
     #endregion
 
@@ -392,7 +220,13 @@ public class Interpreter
         {
             string items = givenVariableValue[1..^1];
 
-            string[] naiveArray = ParseArguments(items);
+            string[] naiveArray = StaticHelpers.ParseArguments(items);
+
+            // check if assignment was empty
+            if (string.IsNullOrWhiteSpace(naiveArray[0]))
+            {
+                return new List<object>();
+            }
 
             object[] trueArray = new object[naiveArray.Length];
             for (int i = 0; i < naiveArray.Length; i++)
@@ -414,11 +248,11 @@ public class Interpreter
         {
             string variableName = givenVariableValue[..givenVariableValue.IndexOf('[')];
 
-            if (!TryGetVariable(variableName, out object value)) { return null; }
+            if (!TryGetVariable(variableName, out object? value) || value is not List<object>) { return null; }
 
-            string attemptedIndex = givenVariableValue[(givenVariableValue.IndexOf('[') + 1)..givenVariableValue.IndexOf(']')];
+            string attemptedIndex = givenVariableValue[(givenVariableValue.IndexOf('[') + 1)..^1];
 
-            if (!GetValueOfToken(attemptedIndex, out object index)) { return null; }
+            if (!GetValueOfToken(attemptedIndex, out object? index)) { return null; }
             if (!int.TryParse(index.ToString(), out int intIndex)) { return null; }
 
             if (value is List<object> list)
@@ -430,7 +264,7 @@ public class Interpreter
         return null;
     }
 
-    private object? InvokeMethod(DynamicClassInstance obj, string methodName, object[] args)
+    private object? InvokeMethod(DynamicClassInstance obj, string methodName, object?[] args)
     {
         if (obj.Methods.TryGetValue(methodName, out var methodDef))
         {
@@ -466,31 +300,37 @@ public class Interpreter
         {
             string className = tokens[..tokens.IndexOf('(')];
             string argsString = tokens[(tokens.IndexOf('(') + 1)..^1];
-            string[] argsArray = ParseArguments(argsString);
+            string[] argsArray = StaticHelpers.ParseArguments(argsString);
             object[] args = new object[argsArray.Length];
 
-            for (int i = 0; i < argsArray.Length; i++)
+            bool isValidArguments = !string.IsNullOrWhiteSpace(argsArray[0]);
+            if (isValidArguments)
             {
-                if (!GetValueOfToken(argsArray[i], out object? argValue))
+                for (int i = 0; i < argsArray.Length; i++)
                 {
-                    throw new Exception($"Error parsing argument '{argsArray[i]}' for class '{className}'.");
+                    if (!GetValueOfToken(argsArray[i], out args[i]))
+                    {
+                        throw new Exception($"Error parsing argument '{argsArray[i]}' for class '{className}'.");
+                    }
                 }
-                args[i] = argValue;
             }
 
             if (userDefinedClasses.TryGetValue(className, out ClassDefinition classDef))
             {
                 DynamicClassInstance dynamicClass = new(classDef);
 
-                // select all properties that need constructing
-                var constructedProperties = classDef.Properties.Where(pair => pair.Value != null && classDef.Parameters.Contains(pair.Value.ToString())).ToDictionary(pair => pair.Key, pair => pair.Value);
-
-                for (int i = 0; i < constructedProperties.Count; i++)
+                if (isValidArguments)
                 {
-                    string key = constructedProperties.ElementAt(i).Key;
-                    dynamicClass.Properties[key] = args[i];
-                }
+                    // select all properties that need constructing
+                    var constructedProperties = classDef.Properties.Where(pair => pair.Value != null && classDef.Parameters.Contains(pair.Value.ToString())).ToDictionary(pair => pair.Key, pair => pair.Value);
 
+                    for (int i = 0; i < constructedProperties.Count; i++)
+                    {
+                        string key = constructedProperties.ElementAt(i).Key;
+                        dynamicClass.Properties[key] = args[i];
+                    }
+                }
+                
                 trueVariableValue = dynamicClass;
 
                 return true;
@@ -513,8 +353,8 @@ public class Interpreter
             if (memberNameAndArgs.Contains('('))
             {
                 string argsString = memberNameAndArgs[(memberNameAndArgs.IndexOf('(') + 1)..^1];
-                string[] argsArray = ParseArguments(argsString);
-                object[] args = new object[argsArray.Length];
+                string[] argsArray = StaticHelpers.ParseArguments(argsString);
+                object?[] args = new object?[argsArray.Length];
 
                 for (int i = 0; i < argsArray.Length; i++)
                 {
@@ -530,7 +370,7 @@ public class Interpreter
             }
             else
             {
-                trueVariableValue = GetProperty(pyObj, memberName);
+                trueVariableValue = StaticHelpers.GetProperty(pyObj, memberName);
                 return true;
             }
         }
@@ -539,6 +379,51 @@ public class Interpreter
         return false;
     }
 
+    private Dictionary<object, object>? HandleDictionaryAssignment(string givenVariableValue)
+    {
+        if (givenVariableValue.Contains('{') && givenVariableValue.EndsWith('}'))
+        {
+            givenVariableValue = givenVariableValue[(givenVariableValue.IndexOf('{') + 1)..^1];
+
+            string[] keyValuePairs = StaticHelpers.ParseArguments(givenVariableValue);
+
+            Dictionary<object, object> dictionary = new();
+
+            // check if assignment was empty
+            if (string.IsNullOrWhiteSpace(keyValuePairs[0])) { return dictionary; }
+            
+            foreach (string kvp in keyValuePairs)
+            {
+                string[] element = kvp.Split(':').Select(arg => arg.Trim()).ToArray();
+                
+                if (!GetValueOfToken(element[0], out object? key) || !GetValueOfToken(element[1], out object? value)) { return null; }
+
+                dictionary[key] = value;
+            }
+
+            return dictionary;
+        }
+
+        return null;
+    }
+    
+    private object? HandleDictionaryLookup(string givenVariableValue)
+    {
+        if (givenVariableValue.Contains('[') && givenVariableValue.EndsWith(']'))
+        {
+            string variableName = givenVariableValue[..givenVariableValue.IndexOf('[')];
+
+            if (!TryGetVariable(variableName, out object? value) || value is not Dictionary<object, object> dict) { return null; }
+
+            string attemptedKey = givenVariableValue[(givenVariableValue.IndexOf('[') + 1)..^1];
+
+            if (!GetValueOfToken(attemptedKey, out object? key)) { return null; }
+
+            return dict[key];
+        }
+
+        return null;
+    }
 
     private bool GetValueOfToken(string tokens, out object? trueVariableValue, DynamicClassInstance? passedObj = null)
     {
@@ -552,6 +437,8 @@ public class Interpreter
         }
 
         if (TryParseVariableValue(tokens, out trueVariableValue)) { return true; }
+        
+        if (TryGetVariable(tokens, out trueVariableValue)) { return true; }
 
         // else, attempt to get value from function
         trueVariableValue = GetValueFromFunction(tokens, passedObj);
@@ -563,6 +450,12 @@ public class Interpreter
         trueVariableValue = HandleListAccess(tokens);
         if (trueVariableValue is not null) { return true; }
 
+        trueVariableValue = HandleDictionaryAssignment(tokens);
+        if (trueVariableValue is not null) { return true; }
+        
+        trueVariableValue = HandleDictionaryLookup(tokens);
+        if (trueVariableValue is not null) { return true; }
+
         try
         {
             if (tokens.Contains('.'))
@@ -571,7 +464,7 @@ public class Interpreter
                 string methodNameAndArgs = tokens[(tokens.IndexOf('.') + 1)..];
                 string methodName = methodNameAndArgs[..methodNameAndArgs.IndexOf('(')];
 
-                string[] args = ParseArguments(methodNameAndArgs[(methodNameAndArgs.IndexOf('(') + 1)..^1]);
+                string[] args = StaticHelpers.ParseArguments(methodNameAndArgs[(methodNameAndArgs.IndexOf('(') + 1)..^1]);
 
                 if (TryExecuteMethod(variableName, methodName, args, out trueVariableValue)) { return true; }
             }
@@ -592,59 +485,25 @@ public class Interpreter
         return TryGetVariable(tokens, out trueVariableValue);
     }
 
-    // this allows for fully recursive arguments
-    // ie: a string of "\"add\", Sum(27, Sub(56, 2)), 3, 8"
-    // will correctly return an array of:
-    /* 
-     * - "add"
-     * - Sum(27, Sub(56, 2))
-     * - 3
-     * - 8
-     */
-    // and on the second index, the same algorithm will parse Sum(27, Sub(56, 2)) as:
-    /* 
-     * - 27
-     * - Sub(56, 2)
-     */
-    // and so on and so forth..
-    private static string[] ParseArguments(string arguments)
+    public object? HandleDictionaryMethods(Dictionary<object, object> dict, string methodName, string[] args)
     {
-        var args = new List<string>();
-        bool inQuotes = false;
-        int depth = 0;
-        int start = 0;
-
-        for (int i = 0; i < arguments.Length; i++)
+        switch (methodName)
         {
-            switch (arguments[i])
-            {
-                case '"':
-                    inQuotes = !inQuotes;
-                    break;
-                case '(':
-                case '[':
-                    if (!inQuotes) { depth++; }
-                    break;
-                case ')':
-                case ']':
-                    if (!inQuotes) { depth--; }
-                    break;
-                case ',':
-                    if (!inQuotes && depth == 0)
-                    {
-                        args.Add(arguments[start..i].Trim());
-                        start = i + 1;
-                    }
-                    break;
-            }
+            case "containsKey":
+                if (args.Length == 1 && GetValueOfToken(args[0], out object? value)) { return dict.ContainsKey(value); }
+                break;
+            
+            case "containsValue":
+                if (args.Length == 1 && GetValueOfToken(args[0], out value)) { return dict.ContainsValue(value); }
+                break;
+            
+            case "stringify":
+                return '{' + string.Join(", ", dict.Select(kv => $"{kv.Key}: {kv.Value}")) + '}';;
         }
 
-        // add the last token
-        args.Add(arguments[start..].Trim());
-
-        return args.ToArray();
-    }
-
+        return null;
+    }   
+    
     private object? HandleListMethods(List<object> list, string methodName, string[] args)
     {
         switch (methodName)
@@ -664,15 +523,28 @@ public class Interpreter
             case "contains":
                 if (args.Length == 1 && GetValueOfToken(args[0], out value)) { return list.Contains(Convert.ToDouble(value)); }
                 break;
+            
+            case "slice":
+                if (!GetValueOfToken(args[0], out object? start) || !GetValueOfToken(args[1], out object? end))
+                {
+                    return null;
+                }
+
+                if (!int.TryParse(start.ToString(), out int intStart) || !int.TryParse(end.ToString(), out int intEnd))
+                {
+                    return null;
+                }
+
+                return list[intStart..intEnd];
 
             case "max":
-                return list.Max(item => Convert.ToDouble(item));
+                return list.Max(Convert.ToDouble);
 
             case "min":
-                return list.Min(item => Convert.ToDouble(item));
+                return list.Min(Convert.ToDouble);
 
             case "stringify":
-                return Stringify([list]);
+                return '[' + string.Join(", ", list.Select(x => x.ToString()).ToArray()) + ']';;
         }
         return null;
     }
@@ -689,6 +561,19 @@ public class Interpreter
 
             case "reverse":
                 return str.Reverse();
+            
+            case "slice":
+                if (!GetValueOfToken(args[0], out object? start) || !GetValueOfToken(args[1], out object? end))
+                {
+                    return null;
+                }
+
+                if (!int.TryParse(start.ToString(), out int intStart) || !int.TryParse(end.ToString(), out int intEnd))
+                {
+                    return null;
+                }
+
+                return str[intStart..intEnd];
 
             case "contains":
                 if (args.Length == 1 && GetValueOfToken(args[0], out object value)) { return str.Contains((string)value); }
@@ -700,7 +585,7 @@ public class Interpreter
 
     private bool TryExecuteMethod(string variableName, string methodName, string[] methodArgs, out object? result)
     {
-        if (!GetValueOfToken(variableName, out object target))
+        if (!GetValueOfToken(variableName, out object? target))
         {
             result = null;
             return false;
@@ -712,6 +597,10 @@ public class Interpreter
             {
                 case List<object> var:
                     result = HandleListMethods(var, methodName, methodArgs);
+                    return result != null;
+                
+                case Dictionary<object, object> var:
+                    result = HandleDictionaryMethods(var, methodName, methodArgs);
                     return result != null;
 
                 case string var:
@@ -741,8 +630,8 @@ public class Interpreter
         string referencedFunction = line[..indexOfOpenBrace];
 
         string arguments = line[(indexOfOpenBrace + 1)..^1];
-        string[] args = ParseArguments(arguments);
-        object[] trueArgs = new object[args.Length];
+        string[] args = StaticHelpers.ParseArguments(arguments);
+        object?[] trueArgs = new object?[args.Length];
 
         // evaluate args into a variable reference or else
         for (int i = 0; i < args.Length; i++)
@@ -752,7 +641,7 @@ public class Interpreter
             if (string.IsNullOrWhiteSpace(arg)) { break; }
 
             // try to get the value from the variables dictionary. If that doesn't work: attempt a parse
-            if (!GetValueOfToken(arg, out object value))
+            if (!GetValueOfToken(arg, out object? value))
             {
                 return null;
             }
@@ -760,8 +649,6 @@ public class Interpreter
             // assign the retrieved or parsed value back to the args array
             trueArgs[i] = value;
         }
-
-        if (trueArgs[0] is null) { trueArgs[0] = string.Empty; }
 
         if (inbuiltFunctions.TryGetValue(referencedFunction, out var function))
         {
@@ -830,21 +717,22 @@ public class Interpreter
         // object[] represents function arguments
         inbuiltFunctions = new()
         {
-            { "print", new Func<object[], object>(Print) },
-            { "sleep", new Func<object[], object>(Sleep) },
-            { "root", new Func<object[], object>(Root) },
-            { "abs", new Func<object[], object>(Abs) },
-            { "sin", new Func<object[], object>(Sin) },
-            { "cos", new Func<object[], object>(Cos) },
-            { "tan", new Func<object[], object>(Tan) },
-            { "asin", new Func<object[], object>(Asin) },
-            { "acos", new Func<object[], object>(Acos) },
-            { "atan", new Func<object[], object>(Atan) },
+            { "print", new Func<object[], object>(StaticInbuilts.Print) },
+            { "sleep", new Func<object[], object>(StaticInbuilts.Sleep) },
+            { "root", new Func<object[], object>(StaticInbuilts.Root) },
+            { "abs", new Func<object[], object>(StaticInbuilts.Abs) },
+            { "sin", new Func<object[], object>(StaticInbuilts.Sin) },
+            { "cos", new Func<object[], object>(StaticInbuilts.Cos) },
+            { "tan", new Func<object[], object>(StaticInbuilts.Tan) },
+            { "asin", new Func<object[], object>(StaticInbuilts.Asin) },
+            { "acos", new Func<object[], object>(StaticInbuilts.Acos) },
+            { "atan", new Func<object[], object>(StaticInbuilts.Atan) },
             { "input", new Func<object[], object>(Input) },
-            { "len", new Func<object[], object>(Length) },
-            { "stringify", new Func<object[], object>(Stringify) },
-            { "ReadFile", new Func<object[], object>(ReadFile) },
-            { "WriteFile", new Func<object[], object>(WriteFile) },
+            { "len", new Func<object[], object>(StaticInbuilts.Length) },
+            { "stringify", new Func<object[], object>(StaticInbuilts.Stringify) },
+            { "randint", new Func<object[], object>(StaticInbuilts.RandomInt)},
+            { "ReadFile", new Func<object[], object>(StaticInbuilts.ReadFile) },
+            { "WriteFile", new Func<object[], object>(StaticInbuilts.WriteFile) },
             { "deref", new Func<object[], object>(Dereference) }
         };
     }
@@ -1024,11 +912,11 @@ public class Interpreter
                             throw new Exception($"Error parsing variable type at line: {lineNumber} for variable: '{key}', holding value: '{givenVariableValue}'.");
                         }
 
-                        if (passedObj is not null && passedObj.Properties.ContainsKey(key)) { SetProperty(passedObj, key, trueVariableValue); }
+                        if (passedObj is not null && passedObj.Properties.ContainsKey(key)) { StaticHelpers.SetProperty(passedObj, key, trueVariableValue); }
                         else { SetVariable(key, trueVariableValue); }
                         break;
 
-                    // assignment to array at index
+                    // assignment to array or dictionary at index / key
                     case string array when array.Contains('[') && array.EndsWith(']'):
                         // remove '='
                         tokens.Dequeue();
@@ -1039,22 +927,30 @@ public class Interpreter
                         string attemptedIndex = array[(array.IndexOf('[') + 1)..array.IndexOf(']')];
 
                         if (!GetValueOfToken(attemptedIndex, out object index)) { throw new Exception($"Error at line: {lineNumber}, value '{attemptedIndex}' cannot be parsed."); }
-                        if (!int.TryParse(index.ToString(), out int intIndex)) { throw new Exception($"Error at line: {lineNumber}, value '{index}' is not an integer."); }
-
-                        List<object> list = value as List<object>;
-
                         if (!GetValueOfToken(string.Join(' ', tokens), out value)) { throw new Exception($"Error at line: {lineNumber}, value '{tokens.Dequeue()}' could not be parsed."); }
 
-                        try
+                        if (TryGetVariable(variableName, out object? variable) && variable is List<object> list)
                         {
-                            list[intIndex] = value;
+                            if (!int.TryParse(index.ToString(), out int intIndex)) { throw new Exception($"Error at line: {lineNumber}, value '{index}' is not an integer."); }
+                            
+                            try
+                            {
+                                list[intIndex] = value;
+                            }
+                            catch (ArgumentOutOfRangeException)
+                            {
+                                list.Add(value);
+                            }
+                            
+                            SetVariable(variableName, list);
                         }
-                        catch (ArgumentOutOfRangeException)
+                        
+                        else if (TryGetVariable(variableName, out variable) && variable is Dictionary<object, object> dict)
                         {
-                            list.Add(value);
+                            dict[index] = value;
+                            SetVariable(variableName, dict);
                         }
-
-                        SetVariable(variableName, list);
+                     
                         break;
 
                     // if statement
@@ -1122,20 +1018,18 @@ public class Interpreter
                         if (forLoopInstruction.Contains('(') && forLoopInstruction.Contains(')'))
                         {
                             string scope = ParseCodeInCurlyBraces(ref codeLines, ref lineNumber);
+                            string[] args = forLoopInstruction[1..^1].Split(';');
 
-                            string[] args = forLoopInstruction[1..^1].Split(';').Select(arg => arg.Trim()).ToArray();
-
-                            string[] forLoopVar = args[0].Split(' ');
+                            string[] forLoopVar = args[0].Trim().Split(' ');
                             string forLoopVarName = forLoopVar[0];
-                            string forLoopStart = forLoopVar[2];
 
-                            if (!GetValueOfToken(forLoopStart, out object start))
+                            if (!GetValueOfToken(forLoopVar[2], out object start))
                             {
                                 throw new Exception($"Error parsing for loop arguments at line {lineNumber}.");
                             }
 
-                            string[] forLoopConditions = args[1].Split(' ');
-                            string[] operation = args[2].Split(' ');
+                            string[] forLoopConditions = args[1].Trim().Split(' ');
+                            string[] operation = args[2].Trim().Split(' ');
 
                             GetValueOfToken(operation[2], out object? operandObject);
                             int operand = Convert.ToInt32(operandObject);
@@ -1144,36 +1038,35 @@ public class Interpreter
                             GetValueOfToken(forLoopConditions[2], out object? conditionObject);
                             double conditionValue = Convert.ToDouble(conditionObject);
 
-                            var operations = new Dictionary<string, Func<int, int, int>>
-                            {
-                                ["+"] = (x, y) => x + y,
-                                ["-"] = (x, y) => x - y,
-                                ["*"] = (x, y) => x * y,
-                                ["/"] = (x, y) => x / y,
-                            };
-
-                            var conditions = new Dictionary<string, Func<int, double, bool>>
-                            {
-                                ["<"] = (x, y) => x < y,
-                                ["<="] = (x, y) => x <= y,
-                                [">"] = (x, y) => x > y,
-                                [">="] = (x, y) => x >= y,
-                                ["=="] = (x, y) => x == y,
-                                ["!="] = (x, y) => x != y
-                            };
+                            EnterScope();
 
                             int current = Convert.ToInt32(start);
-                            Func<int, int> op = i => operations[opCode](i, operand);
-                            Func<int, bool> cond = i => conditions[condition](i, conditionValue);
+                            Func<int, int> op = opCode switch
+                            {
+                                "+" => i => i + operand,
+                                "-" => i => i - operand,
+                                "*" => i => i * operand,
+                                "/" => i => i / operand,
+                                _ => throw new Exception($"Invalid operation {opCode}")
+                            };
 
-                            EnterScope();
-                            SetVariable(forLoopVarName, Convert.ToInt32(start));
-                            while (cond(current))
+                            Func<int, bool> cond = condition switch
+                            {
+                                "<" => i => i < conditionValue,
+                                "<=" => i => i <= conditionValue,
+                                ">" => i => i > conditionValue,
+                                ">=" => i => i >= conditionValue,
+                                "==" => i => Math.Abs(i - conditionValue) < double.Epsilon,
+                                "!=" => i => Math.Abs(i - conditionValue) >= double.Epsilon,
+                                _ => throw new Exception($"Invalid condition {condition}")
+                            };
+
+                            for (; cond(current); current = op(current))
                             {
                                 SetVariable(forLoopVarName, current);
                                 Interpret(scope, passedObj: passedObj);
-                                current = op(current);
                             }
+
                             ExitScope();
                             break;
                         }
@@ -1208,7 +1101,7 @@ public class Interpreter
 
                         throw new Exception($"An error has occurred at line: {lineNumber}. The 'return' keyword can only be used from within a function.");
 
-                    case string method when method.Contains('.'):
+                    case { } method when method.Contains('.'):
                         try
                         {
                             method = string.Join(' ', line);
@@ -1217,21 +1110,21 @@ public class Interpreter
                             string methodNameAndArgs = method[(method.IndexOf('.') + 1)..];
                             string methodName = methodNameAndArgs[..methodNameAndArgs.IndexOf('(')];
 
-                            string[] methodArgs = ParseArguments(methodNameAndArgs[(methodNameAndArgs.IndexOf('(') + 1)..^1]);
+                            string[] methodArgs = StaticHelpers.ParseArguments(methodNameAndArgs[(methodNameAndArgs.IndexOf('(') + 1)..^1]);
 
-                            if (TryGetVariable(variableName, out object? potentialObject) && potentialObject is DynamicClassInstance)
+                            if (TryGetVariable(variableName, out object? potentialObject) && potentialObject is DynamicClassInstance instance)
                             {
-                                object[] trueArgs = new object[methodArgs.Length];
+                                object?[] trueArgs = new object?[methodArgs.Length];
 
                                 for (int i = 0; i < methodArgs.Length; i++)
                                 {
                                     if (!GetValueOfToken(methodArgs[i], out trueArgs[i])) { throw new Exception($"An error has occurred at line: {lineNumber}. The method '{method}' could not be found."); }
                                 }
 
-                                InvokeMethod((DynamicClassInstance)potentialObject, methodName, trueArgs);
+                                InvokeMethod(instance, methodName, trueArgs);
                             }
 
-                            else if (!TryExecuteMethod(variableName, methodName, methodArgs, out object? result))
+                            else if (!TryExecuteMethod(variableName, methodName, methodArgs, out object? _))
                             {
                                 throw new Exception($"An error has occurred at line: {lineNumber}. The method '{method}' could not be found.");
                             }
@@ -1259,7 +1152,7 @@ public class Interpreter
                                 throw new Exception($"Error parsing value '{givenVariableValue}' for property '{propertyName}' on object '{objectName}'.");
                             }
 
-                            SetProperty(pyObj, propertyName, trueVariableValue);
+                            StaticHelpers.SetProperty(pyObj, propertyName, trueVariableValue);
                         }
                         
                         break;

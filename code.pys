@@ -6,7 +6,7 @@ class Calculator(numbers)
 	{
 		var length = len(numbersArray)
 		var result = numbersArray[0]
-		
+
 		if (opCode == "+")
 		{
 			for (i = 1; i < length; i + 1)
@@ -29,9 +29,9 @@ class Calculator(numbers)
 }
 
 
-var numbers = [1]
+var numbers = []
 
-for (i = 1; i < 20; i + 1)
+for (i = 0; i < 20; i + 1)
 {
 	numbers[i] = i
 }

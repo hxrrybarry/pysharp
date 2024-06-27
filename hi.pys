@@ -1,23 +1,25 @@
-class Test(a, b, c)
-{
-	var x = a
-	var y = b
-	var z = c
+// notation for dicts is curly braces
+var dict = { "key1": 1, "key2": 2, "key3": 3 }
+print(f"{dict}")
 
-	fn DoSomething(crack)
-	{
-		print(crack)
-		return 0
-	}
+var key = "key4"
+var value = 4
+dict[key] = value
 
-	fn DoSomethingElse(cocaine)
-	{
-		DoSomething(cocaine)
-		return 0
-	}
-}
+var x = dict[key]
+print(f"{dict}")
 
+x = dict.containsKey("key1")
+print(x)
+x = dict.containsValue(2)
+print(x)
+x = dict.containsKey("key5")
+print(x)
 
-var hi = Test(1, 2, 3)
+var someString = "Hello World!"
 
-hi.DoSomethingElse("test")
+var half = len(test)
+half = half / 2
+
+var sliced = someString.slice(0, half)
+print(f"{someString}\n{sliced}")
