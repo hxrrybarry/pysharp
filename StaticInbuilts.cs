@@ -1,10 +1,7 @@
-using System.Xml;
-
 namespace pysharp;
 
 public static class StaticInbuilts
 {
-    #region Inbuilt Functions
     public static object Print(object[] args)
     {
         string text = Convert.ToString(args[0]);
@@ -56,7 +53,6 @@ public static class StaticInbuilts
         try
         {
             float n = Convert.ToSingle(args[0]);
-
             return MathF.Abs(n);
         }
         catch { return null; }
@@ -137,18 +133,17 @@ public static class StaticInbuilts
     {
         object trueValue = args[0];
 
-        if (trueValue is List<object>)
+        return trueValue switch
         {
-            List<object> list = trueValue as List<object>;
-            return list.Count;
-        }
-
-        return Convert.ToString(trueValue).Length;
+            List<object> list => list.Count,
+            Dictionary<object, object> dict => dict.Count,
+            _ => Convert.ToString(trueValue).Length
+        };
     }
 
     public static object RandomInt(object[] args)
     {
-        if (!int.TryParse(args[0].ToString(), out int min) && !int.TryParse(args[1].ToString(), out int max))
+        if (int.TryParse(args[0].ToString(), out int min) && int.TryParse(args[1].ToString(), out int max))
         {
             return new Random().Next(min, max);
         }
@@ -173,5 +168,4 @@ public static class StaticInbuilts
         File.WriteAllText(path, text);
         return true;
     }
-    #endregion
 }

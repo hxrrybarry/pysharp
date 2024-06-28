@@ -15,15 +15,11 @@ class Calculator(numbers)
 				result = result + n
 			}
 		}
-		else if (opCode == "*")
+		else
 		{
-			for (i = 1; i < length; i + 1)
-			{
-				var n = numbersArray[i]
-				result = result * n
-			}
+		    result = "Invalid operation."
 		}
-
+		
 		return result
 	}
 }
@@ -31,7 +27,7 @@ class Calculator(numbers)
 
 var numbers = []
 
-for (i = 0; i < 20; i + 1)
+for (i = 1; i < 30; i + 1)
 {
 	numbers[i] = i
 }
@@ -39,7 +35,8 @@ for (i = 0; i < 20; i + 1)
 var calc = Calculator(numbers)
 deref(@numbers)
 
-var result = calc.Operate("+")
+var operator = input("Operator: ")
+var result = calc.Operate(operator)
 deref(@calc)
 
 print(result)

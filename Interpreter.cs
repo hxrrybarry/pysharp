@@ -932,12 +932,12 @@ public class Interpreter
                         if (TryGetVariable(variableName, out object? variable) && variable is List<object> list)
                         {
                             if (!int.TryParse(index.ToString(), out int intIndex)) { throw new Exception($"Error at line: {lineNumber}, value '{index}' is not an integer."); }
-                            
-                            try
+
+                            if (intIndex < list.Count)
                             {
                                 list[intIndex] = value;
                             }
-                            catch (ArgumentOutOfRangeException)
+                            else
                             {
                                 list.Add(value);
                             }
@@ -945,7 +945,7 @@ public class Interpreter
                             SetVariable(variableName, list);
                         }
                         
-                        else if (TryGetVariable(variableName, out variable) && variable is Dictionary<object, object> dict)
+                        else if (variable is Dictionary<object, object> dict)
                         {
                             dict[index] = value;
                             SetVariable(variableName, dict);

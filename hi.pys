@@ -1,25 +1,6 @@
-// notation for dicts is curly braces
-var dict = { "key1": 1, "key2": 2, "key3": 3 }
-print(f"{dict}")
+for (i = 0; i < 100000; i + 1)
+{
+    print(i)
+}
 
-var key = "key4"
-var value = 4
-dict[key] = value
-
-var x = dict[key]
-print(f"{dict}")
-
-x = dict.containsKey("key1")
-print(x)
-x = dict.containsValue(2)
-print(x)
-x = dict.containsKey("key5")
-print(x)
-
-var someString = "Hello World!"
-
-var half = len(test)
-half = half / 2
-
-var sliced = someString.slice(0, half)
-print(f"{someString}\n{sliced}")
+print("Done")
