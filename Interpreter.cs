@@ -9,6 +9,7 @@ namespace pysharp;
  * Recursive functions don't work
  * Cannot put open curly brace on same line (have to do it on next)
  * After an optimization of mathematical evaluation, scoping is now a bit weird
+ * Line number is still askew
  */
 
 public struct ClassDefinition(string[] arguments)
