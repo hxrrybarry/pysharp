@@ -2,5 +2,3 @@ for (i = 0; i < 100000; i + 1)
 {
     print(i)
 }
-
-print("Done")

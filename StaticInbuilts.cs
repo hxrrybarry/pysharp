@@ -4,7 +4,7 @@ public static class StaticInbuilts
 {
     public static object Print(object[] args)
     {
-        string text = Convert.ToString(args[0]);
+        string text = args[0].ToString();
 
         Console.WriteLine(text);
         return true;
@@ -28,7 +28,7 @@ public static class StaticInbuilts
         return stringValue;
     }
 
-    public static object? Sleep(object[] args)
+    public static object Sleep(object[] args)
     {
         try
         {
@@ -48,7 +48,7 @@ public static class StaticInbuilts
         catch { return null; }
     }
 
-    public static object? Abs(object[] args)
+    public static object Abs(object[] args)
     {
         try
         {
@@ -58,7 +58,7 @@ public static class StaticInbuilts
         catch { return null; }
     }
 
-    public static object? Root(object[] args)
+    public static object Root(object[] args)
     {
         try
         {
@@ -70,7 +70,7 @@ public static class StaticInbuilts
         catch { return null; }
     }
 
-    public static object? Sin(object[] args)
+    public static object Sin(object[] args)
     {
         try
         {
@@ -80,7 +80,7 @@ public static class StaticInbuilts
         catch { return null; }
     }
 
-    public static object? Cos(object[] args)
+    public static object Cos(object[] args)
     {
         try
         {
@@ -89,7 +89,7 @@ public static class StaticInbuilts
         }
         catch { return null; }
     }
-    public static object? Tan(object[] args)
+    public static object Tan(object[] args)
     {
         try
         {
@@ -99,7 +99,7 @@ public static class StaticInbuilts
         catch { return null; }
     }
 
-    public static object? Asin(object[] args)
+    public static object Asin(object[] args)
     {
         try
         {
@@ -109,7 +109,7 @@ public static class StaticInbuilts
         catch { return null; }
     }
 
-    public static object? Acos(object[] args)
+    public static object Acos(object[] args)
     {
         try
         {
@@ -119,7 +119,7 @@ public static class StaticInbuilts
         catch { return null; }
     }
 
-    public static object? Atan(object[] args)
+    public static object Atan(object[] args)
     {
         try
         {

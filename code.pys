@@ -10,16 +10,26 @@ class Calculator(numbers)
 		if (opCode == "+")
 		{
 			for (i = 1; i < length; i + 1)
-			{
-				var n = numbersArray[i]
+			{	
+			    var n = numbersArray[i]
 				result = result + n
 			}
 		}
-		else
+		
+		else if (opCode == "*")
+		{
+		    for (i = 1; i < length; i + 1)
+            {	
+                var n = numbersArray[i]
+                result = result * n
+            }
+		}
+		
+		else 
 		{
 		    result = "Invalid operation."
 		}
-		
+
 		return result
 	}
 }

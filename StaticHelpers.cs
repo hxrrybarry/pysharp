@@ -69,7 +69,7 @@ public static class StaticHelpers
 
     public static object? GetProperty(DynamicClassInstance obj, string propertyName)
     {
-        if (obj.Properties.TryGetValue(propertyName, out var value))
+        if (obj.Properties.TryGetValue(propertyName, out object? value))
         {
             return value;
         }
