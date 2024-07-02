@@ -33,11 +33,19 @@ public static class StaticHelpers
                     break;
                 case '(':
                 case '[':
-                    if (!inQuotes) { depth++; }
+                    if (!inQuotes)
+                    {
+                        depth++;
+                    }
+
                     break;
                 case ')':
                 case ']':
-                    if (!inQuotes) { depth--; }
+                    if (!inQuotes)
+                    {
+                        depth--;
+                    }
+
                     break;
                 case ',':
                     if (!inQuotes && depth == 0)
@@ -45,6 +53,7 @@ public static class StaticHelpers
                         args.Add(arguments[start..i].Trim());
                         start = i + 1;
                     }
+
                     break;
             }
         }
@@ -53,26 +62,5 @@ public static class StaticHelpers
         args.Add(arguments[start..].Trim());
 
         return args.ToArray();
-    }
-    
-    public static void SetProperty(DynamicClassInstance obj, string propertyName, object value)
-    {
-        if (obj.Properties.ContainsKey(propertyName))
-        {
-            obj.Properties[propertyName] = value;
-        }
-        else
-        {
-            throw new Exception($"Property {propertyName} not found on object.");
-        }
-    }
-
-    public static object? GetProperty(DynamicClassInstance obj, string propertyName)
-    {
-        if (obj.Properties.TryGetValue(propertyName, out object? value))
-        {
-            return value;
-        }
-        throw new Exception($"Property {propertyName} not found on object.");
     }
 }

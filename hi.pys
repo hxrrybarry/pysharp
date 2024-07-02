@@ -1,4 +1,48 @@
-for (i = 0; i < 100000; i + 1)
+class Calculator(numbers)
 {
-    print(i)
+	var numbersArray = numbers
+
+	fn Operate(opCode)
+	{
+		var length = len(numbersArray)
+		var result = numbersArray[0]
+
+		if (opCode == "+")
+		{
+			for (i = 1; i < length; i + 1)
+			{	
+			    var n = numbersArray[i]
+				result = result + n
+			}
+			return result
+		}
+		
+		else if (opCode == "*")
+		{
+		    for (i = 1; i < length; i + 1)
+            {	
+                var n = numbersArray[i]
+                result = result * n
+            }
+            return result
+		}
+		
+		else 
+		{
+		    return "Invalid operation."
+		}
+	}
 }
+
+var numbers = []
+
+for (i = 1; i < 30; i + 1)
+{
+	numbers[i] = i
+}
+
+var calc = Calculator(numbers)
+
+var operator = input("Operator: ")
+var result = calc.Operate(operator)
+print(result)

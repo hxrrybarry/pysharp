@@ -4,26 +4,34 @@ using System.Text.RegularExpressions;
 namespace pysharp;
 
 /* __Known bugs:__
- * Crashes if a user defined function doesn't have a return (pseudo-fix: simply return 0 or something at the end)
- * Cannot do a return statement if within a nest (pseudo-fix: set a variable and then return it at the end)
  * Recursive functions don't work
  * Cannot put open curly brace on same line (have to do it on next)
  * After an optimization of mathematical evaluation, scoping is now a bit weird
  * Line number is still askew
  */
 
-public struct ClassDefinition(string[] arguments)
+public readonly struct DynamicFunction(string[] arguments, string code, bool isVoid)
 {
-    public Dictionary<string, object?> Properties { get; set; } = new();
-    public Dictionary<string, (string[], string)> Methods { get; set; } = new();
-    public string[] Parameters { get; set; } = arguments;
+    public string[] Arguments { get; } = arguments;
+    public string Code { get; } = code;
+    public bool IsVoid { get; } = isVoid;
+}
+
+public readonly struct ClassDefinition(string[] arguments)
+{
+    public Dictionary<string, object?> Properties { get; } = new();
+    public Dictionary<string, DynamicFunction> Methods { get; } = new();
+    public Dictionary<string, string> Getters { get; } = new();
+    public Dictionary<string, (string, string)> Setters { get; } = new();
+    public string[] Parameters { get; } = arguments;
 }
 
 public class DynamicClassInstance(ClassDefinition classDef)
 {
-    public Dictionary<string, object?> Properties { get; set; } = classDef.Properties;
-    public Dictionary<string, (string[], string)> Methods { get; set; } = classDef.Methods;
-    public string[] Parameters { get; set; } = classDef.Parameters;
+    public Dictionary<string, object?> Properties { get; } = classDef.Properties;
+    public Dictionary<string, DynamicFunction> Methods { get; } = classDef.Methods;
+    public Dictionary<string, string> Getters { get; } = classDef.Getters;
+    public Dictionary<string, (string, string)> Setters { get; } = classDef.Setters;
 }
 
 public partial class Interpreter
@@ -33,7 +41,7 @@ public partial class Interpreter
     private Dictionary<string, Delegate> _inbuiltFunctions = new();
 
     // the function name links to an array of variable names, and then the code
-    private readonly Dictionary<string, (string[], string)> _userDefinedFunctions = new();
+    private readonly Dictionary<string, DynamicFunction> _userDefinedFunctions = new();
 
     private readonly Dictionary<string, ClassDefinition> _userDefinedClasses = new();
 
@@ -76,6 +84,7 @@ public partial class Interpreter
         return false;
     }
     
+    /* for unit testing
     public object? GetVariable(string key)
     {
         foreach (var scope in _scopeStack.Reverse())
@@ -87,7 +96,7 @@ public partial class Interpreter
         }
         
         return null;
-    }
+    } */
 
     private void SetVariable(string key, object? value)
     {
@@ -171,7 +180,7 @@ public partial class Interpreter
         return input.StartsWith('"') ? input.Trim('"') : ReplacePlaceholders(input.TrimStart('f').Trim('"'));
     }
 
-    private string ReplaceEscapeCharacters(string input)
+    private static string ReplaceEscapeCharacters(string input)
     {
         return input.Replace("\\n", "\n")
             .Replace("\\t", "\t")
@@ -256,7 +265,7 @@ public partial class Interpreter
         return null;
     }
 
-    private object? InvokeMethod(DynamicClassInstance obj, string methodName, object?[] args)
+    private object? InvokeDynamicMethod(DynamicClassInstance obj, string methodName, object?[] args)
     {
         if (!obj.Methods.TryGetValue(methodName, out var methodDef))
             throw new Exception($"Method {methodName} not found on object.");
@@ -267,17 +276,21 @@ public partial class Interpreter
             {
                 for (int i = 0; i < args.Length; i++)
                 {
-                    SetVariable(methodDef.Item1[i], args[i]);
-                }
+                    SetVariable(methodDef.Arguments[i], args[i]);
+                }  
             }
-            
+             
             foreach (var prop in obj.Properties)
             {
                 SetVariable(prop.Key, prop.Value);
             }
 
-            string functionCode = methodDef.Item2;
-            GetValueOfToken(Interpret(functionCode, true, obj), out object? result);
+            string functionCode = methodDef.Code;
+
+            object? result = null;
+            string returnedResult = Interpret(functionCode, true, obj);
+            if (!methodDef.IsVoid)
+                GetValueOfToken(returnedResult, out result);
 
             return result;
         }
@@ -285,6 +298,44 @@ public partial class Interpreter
         {
             ExitScope();
         }
+    }
+    
+    private void SetProperty(DynamicClassInstance obj, string propertyName, object value)
+    {
+        if (!obj.Properties.ContainsKey(propertyName))
+        {
+            throw new Exception($"Property {propertyName} not found on object.");
+        }
+
+        if (obj.Setters.TryGetValue(propertyName, out (string, string) setterCode))
+        {
+            EnterScope();
+            SetVariable(setterCode.Item1, value);
+            
+            if (!GetValueOfToken(Interpret(setterCode.Item2, true, obj), out value))
+            {
+                throw new Exception($"Invalid return type for setter of class property {propertyName}");
+            }
+
+            ExitScope();
+        }
+
+        obj.Properties[propertyName] = value;
+    }
+    
+    private object? GetProperty(DynamicClassInstance obj, string propertyName)
+    {
+        if (!obj.Properties.TryGetValue(propertyName, out object? value))
+            throw new Exception($"Property {propertyName} not found on object.");
+        
+        if (!obj.Getters.TryGetValue(propertyName, out string getterCode)) { return value; }
+        
+        if (!GetValueOfToken(Interpret(getterCode, true, obj), out value))
+        {
+            throw new Exception($"Invalid return type for getter of class property {propertyName}");
+        }
+
+        return value;
     }
 
     private bool TryGetValueFromClass(string tokens, out object? trueVariableValue)
@@ -361,11 +412,11 @@ public partial class Interpreter
                     }
                 }
                 
-                trueVariableValue = InvokeMethod(pyObj, memberName, args);
+                trueVariableValue = InvokeDynamicMethod(pyObj, memberName, args);
                 return true;
             }
 
-            trueVariableValue = StaticHelpers.GetProperty(pyObj, memberName);
+            trueVariableValue = GetProperty(pyObj, memberName);
             return true;
         }
 
@@ -559,6 +610,10 @@ public partial class Interpreter
                 }
 
                 return list[intStart..intEnd];
+            
+            case "join":
+                if (args.Length == 1 && GetValueOfToken(args[0], out value)) { return string.Join(value.ToString(), list); }
+                break;
 
             case "max":
                 return list.Max(Convert.ToDouble);
@@ -591,6 +646,12 @@ public partial class Interpreter
             
             case "index_of":
                 if (args.Length == 1 && GetValueOfToken(args[0], out object? value)) { return str.IndexOf(value.ToString()); }
+                break;
+            
+            case "split":
+                if (args.Length == 1 && GetValueOfToken(args[0], out value)) { return str.Split(value.ToString())
+                    .Select(item => (object)item) // we need to cast to an object so everything remains dynamic
+                    .ToList(); }
                 break;
             
             case "slice":
@@ -690,26 +751,28 @@ public partial class Interpreter
             {
                 for (int i = 0; i < trueArgs.Length; i++)
                 {
-                    SetVariable(userDefinedFunction.Item1[i], trueArgs[i]);
+                    SetVariable(userDefinedFunction.Arguments[i], trueArgs[i]);
                 }
 
-                return GetValueOfToken(Interpret(userDefinedFunction.Item2, true), out object? result) ? result : 0;
+                string returnedValue = Interpret(userDefinedFunction.Code, true);
+                if (!userDefinedFunction.IsVoid)
+                    return GetValueOfToken(returnedValue, out object? result) ? result : 0;
             }
             finally
             {
                 ExitScope();
             }
         }
-        if (passedObj is not null && passedObj.Methods.ContainsKey(referencedFunction))
+        else if (passedObj is not null && passedObj.Methods.ContainsKey(referencedFunction))
         {
-            return InvokeMethod(passedObj, referencedFunction, trueArgs);
+            return InvokeDynamicMethod(passedObj, referencedFunction, trueArgs);
         }
 
         return null;
     }
 
     // this will only work if the curly brace is on the next line
-    private string ParseCodeInCurlyBraces(ref Queue<string> code, ref int lineNumber)
+    private static string ParseCodeInCurlyBraces(ref Queue<string> code, ref int lineNumber)
     {
         Queue<string> scope = new();
         // remove initial '{'
@@ -928,13 +991,33 @@ public partial class Interpreter
 
                                 case "fn":
                                     string classMethod = string.Join(' ', classTokens);
-                                    string classMethodName = classMethod[..classMethod.IndexOf('(')];
                                     int indexOfOpenBrace = classMethod.IndexOf('(');
+                                    string classMethodName = classMethod[..indexOfOpenBrace];
                                     string classMethodArgs = classMethod[(indexOfOpenBrace + 1)..^1];
                                     string[] methodArgsArray = classMethodArgs.Split(',').Select(arg => arg.Trim()).ToArray();
                                     string methodCode = ParseCodeInCurlyBraces(ref classScope, ref lineNumber);
 
-                                    classDef.Methods[classMethodName] = (methodArgsArray, methodCode);
+                                    DynamicFunction dynamicFunction = new(methodArgsArray, methodCode,
+                                        !methodCode.Contains("\nreturn "));
+                                    
+                                    classDef.Methods[classMethodName] = dynamicFunction;
+                                    break;
+                                
+                                case "get":
+                                    string propertyName = classTokens.Dequeue();
+                                    string getMethodCode = ParseCodeInCurlyBraces(ref classScope, ref lineNumber);
+                                    classDef.Getters[propertyName] = getMethodCode;
+
+                                    break;
+                                
+                                case "set":
+                                    string setterMethod = string.Join(' ', classTokens);
+                                    indexOfOpenBrace = setterMethod.IndexOf('(');
+                                    propertyName = setterMethod[..indexOfOpenBrace];
+                                    string setterMethodArg = setterMethod[(indexOfOpenBrace + 1)..^1];
+                                    string setMethodCode = ParseCodeInCurlyBraces(ref classScope, ref lineNumber);
+                                    classDef.Setters[propertyName] = (setterMethodArg, setMethodCode);
+
                                     break;
 
                                 default:
@@ -968,7 +1051,7 @@ public partial class Interpreter
                             throw new Exception($"Error parsing variable type at line: {lineNumber} for variable: '{instruction}', holding value: '{givenVariableValue}'.");
                         }
 
-                        if (passedObj is not null && passedObj.Properties.ContainsKey(instruction)) { StaticHelpers.SetProperty(passedObj, instruction, trueVariableValue); }
+                        if (passedObj is not null && passedObj.Properties.ContainsKey(instruction)) { SetProperty(passedObj, instruction, trueVariableValue); }
                         else { SetVariable(instruction, trueVariableValue); }
                         break;
 
@@ -1024,7 +1107,9 @@ public partial class Interpreter
                         if ((bool)evaluatedExpression)
                         {
                             EnterScope();
-                            Interpret(scope, passedObj: passedObj);
+                            
+                            string result = Interpret(scope, isFromUserFunction, passedObj);
+                            if (isFromUserFunction && result != "Code executed successfully.") { return result; }
                             ExitScope();
                             // skip any following else if or else blocks
                             SkipElseIfElseBlocks(ref codeLines, ref lineNumber);
@@ -1058,7 +1143,7 @@ public partial class Interpreter
                         // we have to evaluate it again every time the loop is called to account for updating variables
                         while ((bool)EvaluateBooleanExpression(expression))
                         {
-                            Interpret(scope, passedObj: passedObj);
+                            Interpret(scope, isFromUserFunction, passedObj);
                         }
                         ExitScope();
 
@@ -1117,7 +1202,7 @@ public partial class Interpreter
                         for (; cond(current); current = op(current))
                         {
                             SetVariable(forLoopVarName, current);
-                            Interpret(scope, passedObj: passedObj);
+                            Interpret(scope, isFromUserFunction, passedObj);
                         }
                         ExitScope();
                         
@@ -1136,7 +1221,10 @@ public partial class Interpreter
                             args = functionInstruction[(indexOfOpenBrace + 1)..^1].Split(',').Select(arg => arg.Trim()).ToArray();
                             string functionCode = ParseCodeInCurlyBraces(ref codeLines, ref lineNumber);
 
-                            _userDefinedFunctions[functionName] = (args, functionCode);
+                            DynamicFunction dynamicFunction = new(args, functionCode, !functionCode.Contains("\nreturn "));
+                            
+                            _userDefinedFunctions[functionName] = dynamicFunction;
+                           
                             break;
                         }
 
@@ -1163,12 +1251,12 @@ public partial class Interpreter
                             {
                                 object?[] trueArgs = new object?[methodArgs.Length];
 
-                                if (methodArgs.Where((t, i) => !GetValueOfToken(t, out trueArgs[i])).Any())
+                                if (!string.IsNullOrWhiteSpace(methodArgs[0]) && methodArgs.Where((t, i) => !GetValueOfToken(t, out trueArgs[i])).Any())
                                 {
                                     throw new Exception($"An error has occurred at line: {lineNumber}. The method '{method}' could not be found.");
                                 }
 
-                                InvokeMethod(instance, methodName, trueArgs);
+                                InvokeDynamicMethod(instance, methodName, trueArgs);
                             }
 
                             else if (!TryExecuteMethod(variableName, methodName, methodArgs, out object? _))
@@ -1199,7 +1287,7 @@ public partial class Interpreter
                                 throw new Exception($"Error parsing value '{givenVariableValue}' for property '{propertyName}' on object '{objectName}'.");
                             }
 
-                            StaticHelpers.SetProperty(pyObj, propertyName, trueVariableValue);
+                            SetProperty(pyObj, propertyName, trueVariableValue);
                         }
                         
                         break;
