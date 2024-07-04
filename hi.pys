@@ -1,48 +1,32 @@
-class Calculator(numbers)
+class Animal(name)
 {
-	var numbersArray = numbers
-
-	fn Operate(opCode)
-	{
-		var length = len(numbersArray)
-		var result = numbersArray[0]
-
-		if (opCode == "+")
-		{
-			for (i = 1; i < length; i + 1)
-			{	
-			    var n = numbersArray[i]
-				result = result + n
-			}
-			return result
-		}
-		
-		else if (opCode == "*")
-		{
-		    for (i = 1; i < length; i + 1)
-            {	
-                var n = numbersArray[i]
-                result = result * n
-            }
-            return result
-		}
-		
-		else 
-		{
-		    return "Invalid operation."
-		}
-	}
+    var Name = name
+    
+    fn Speak()
+    {
+        print("a")
+    }
 }
 
-var numbers = []
-
-for (i = 1; i < 30; i + 1)
+class Dog(name, adorable) : Animal
 {
-	numbers[i] = i
+    var Name = name
+    var Adored = adorable
+    
+    fn Speak()
+    {
+        print("WOOF")
+    }
 }
 
-var calc = Calculator(numbers)
 
-var operator = input("Operator: ")
-var result = calc.Operate(operator)
-print(result)
+var ashton_dunderdale = Dog("Ashton", true)
+ashton_dunderdale.Speak()
+var adored = ashton_dunderdale.Adored
+
+print(adored)
+
+var teams = Animal("teams")
+var meWhenAshton = teams.Name
+teams.Speak()
+print(meWhenAshton)
