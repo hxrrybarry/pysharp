@@ -1,32 +1,49 @@
-class Animal(name)
+fn Pow(a, n)
 {
-    var Name = name
-    
-    fn Speak()
+    n = n - 1
+    var stored = a
+    for (i = 0; i < n; i + 1)
     {
-        print("a")
+        a = a * stored
     }
-}
-
-class Dog(name, adorable) : Animal
-{
-    var Name = name
-    var Adored = adorable
-    
-    fn Speak()
-    {
-        print("WOOF")
-    }
+    return a
 }
 
 
-var ashton_dunderdale = Dog("Ashton", true)
-ashton_dunderdale.Speak()
-var adored = ashton_dunderdale.Adored
+class Random(low, up)
+{
+    var Lower = low
+    var Upper = up
+    
+    // this allows you to make fields pseudo-readonly
+    set Lower(val)
+    {
+        return Lower
+    }
+    set Upper(val)
+    {
+        return Upper
+    }
 
-print(adored)
+    fn RandInt()
+    {
+        var chosenNumber = randint(Lower, Upper)
+        return chosenNumber
+    }
+    
+    fn RandFloat(decimalMax)
+    {
+        var chosenNumber = randint(Lower, Upper)
+        var chosenDecimal = randint(0, decimalMax)
 
-var teams = Animal("teams")
-var meWhenAshton = teams.Name
-teams.Speak()
-print(meWhenAshton)
+        return chosenNumber + (chosenDecimal / Pow(10, len(decimalMax) - 1))
+    }
+}
+
+
+var rand = Random(0, 101)
+
+var int = rand.RandInt()
+var float = rand.RandFloat(1000)
+
+print(f"Integer: {int}\nFloat: {float}")

@@ -15,7 +15,7 @@ class Random(low, up)
     var Lower = low
     var Upper = up
     
-    // this allows you to make fields pseudo-readonly
+    // this allows you to make properties pseudo-readonly
     set Lower(val)
     {
         return Lower
@@ -27,8 +27,7 @@ class Random(low, up)
 
     fn RandInt()
     {
-        var chosenNumber = randint(Lower, Upper)
-        return chosenNumber
+        return randint(Lower, Upper)
     }
     
     fn RandFloat(decimalMax)
@@ -41,9 +40,43 @@ class Random(low, up)
 }
 
 
-var rand = Random(0, 101)
+var amount = 10
+var randArray = []
+for (i = 0; i < amount; i + 1)
+{
+    randArray[i] = Random(i, 20)
+}
 
-var int = rand.RandInt()
-var float = rand.RandFloat(1000)
+for (i = 0; i < amount; i + 1)
+{
+    var lowerBound = randArray[i]
+    lowerBound = lowerBound.Lower
+    print(lowerBound)
+}
 
-print(f"Integer: {int}\nFloat: {float}")
+print("")
+
+var queried = randArray.query(x : x.Lower > 5 && x.Lower < 9)
+
+var length = len(queried)
+for (i = 0; i < length; i + 1)
+{
+    var lowerQueried = queried[i]
+    lowerQueried = lowerQueried.Lower
+    print(lowerQueried)
+}
+
+print("")
+
+var arr = []
+for (i = 0; i < 100; i + 1) 
+{
+    arr[i] = i
+}
+
+print(stringify(arr))
+
+print("")
+
+var q = arr.query(x : x % 3 == 0 && x % 5 == 0)
+print(stringify(q))

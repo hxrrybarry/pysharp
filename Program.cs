@@ -1,6 +1,4 @@
-﻿using System.Diagnostics;
-using System.Text.RegularExpressions;
-using NUnit.Framework;
+﻿using System.Text.RegularExpressions;
 
 namespace pysharp;
 
@@ -16,7 +14,7 @@ internal partial class Program
 
     public static void Main()
     {
-        string code = NormalizeNewlines(File.ReadAllText(@"C:\Users\HarrisonO’Leary\RiderProjects\pysharp\game.pys"));
+        string code = NormalizeNewlines(File.ReadAllText(@"C:\Users\harib\source\repos\pysharp\game.pys"));
 
         Interpreter interpreter = new();
         string errorMessage = interpreter.Interpret(code);

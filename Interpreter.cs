@@ -1,5 +1,4 @@
-﻿using System.Diagnostics;
-using System.Linq.Dynamic.Core;
+﻿using System.Linq.Dynamic.Core;
 using System.Text.RegularExpressions;
 
 namespace pysharp;
@@ -11,28 +10,35 @@ namespace pysharp;
  * Line number is still askew
  */
 
-public readonly struct DynamicFunction(string[] arguments, string code, bool isVoid)
+public readonly struct DynamicFunction(string[] arguments, string code)
 {
     public string[] Arguments { get; } = arguments;
     public string Code { get; } = code;
-    public bool IsVoid { get; } = isVoid;
+    public bool IsVoid { get; } = IsVoidFunction(code);
+    
+    private static bool IsVoidFunction(string code)
+    {
+        const string pattern = @"(?m)^(?!//)\s*return\s+\S";
+    
+        return !Regex.IsMatch(code, pattern, RegexOptions.IgnoreCase | RegexOptions.Multiline);
+    }
 }
 
-public readonly struct ClassDefinition(string[] arguments)
+public struct ClassDefinition(string[] arguments)
 {
-    public Dictionary<string, object?> Properties { get; } = new();
-    public Dictionary<string, DynamicFunction> Methods { get; } = new();
-    public Dictionary<string, string> Getters { get; } = new();
-    public Dictionary<string, (string, string)> Setters { get; } = new();
-    public string[] Parameters { get; } = arguments;
+    public Dictionary<string, object?> Properties { get; set; } = new();
+    public Dictionary<string, DynamicFunction> Methods { get; set; } = new();
+    public Dictionary<string, string> Getters { get; set; } = new();
+    public Dictionary<string, (string, string)> Setters { get; set; } = new();
+    public string[] Parameters { get; set; } = arguments;
 }
 
 public class DynamicClassInstance(ClassDefinition classDef)
 {
-    public Dictionary<string, object?> Properties { get; } = classDef.Properties;
-    public Dictionary<string, DynamicFunction> Methods { get; } = classDef.Methods;
-    public Dictionary<string, string> Getters { get; } = classDef.Getters;
-    public Dictionary<string, (string, string)> Setters { get; } = classDef.Setters;
+    public Dictionary<string, object?> Properties { get; } = new Dictionary<string, object?>(classDef.Properties);
+    public Dictionary<string, DynamicFunction> Methods { get; } = new Dictionary<string, DynamicFunction>(classDef.Methods);
+    public Dictionary<string, string> Getters { get; } = new Dictionary<string, string>(classDef.Getters);
+    public Dictionary<string, (string, string)> Setters { get; } = new Dictionary<string, (string, string)>(classDef.Setters);
 }
 
 public partial class Interpreter
@@ -124,85 +130,72 @@ public partial class Interpreter
         catch { return null; }
     }
 
-    private double? EvaluateMathematicalExpression(string input)
+    private string ReplaceInbuiltFunctionsWithValue(string input)
     {
-        NCalc.Expression expression = new(input);
-        if (expression.HasErrors()) { return null; }
-        try
+        return MyRegex1().Replace(input, match =>
         {
-            // Add variables
-            foreach (var variable in _globalVariables)
+            string functionName = match.Groups[1].Value;
+            string argsString = match.Groups[2].Value;
+            
+            // recursively process nested function calls in arguments
+            argsString = ReplaceInbuiltFunctionsWithValue(argsString);
+            
+            string[] args = StaticHelpers.ParseArguments(argsString);
+
+            object[] trueArgs = new object[args.Length];
+
+            if (args.Where((t, i) => !GetValueOfToken(t, out trueArgs[i])).Any())
             {
-                expression.Parameters[variable.Key] = variable.Value;
+                // if we can't parse all arguments, return the original function call with processed arguments
+                return $"{functionName}({argsString})";
             }
 
-            // Add custom function and inbuilt function support
-            expression.EvaluateFunction += (name, args) =>
+            if (_inbuiltFunctions.TryGetValue(functionName, out var functionDelegate))
             {
-                if (_userDefinedFunctions.TryGetValue(name, out var userFunction))
+                var castedFunction = (Func<object[], object>)functionDelegate;
+                
+                object result = castedFunction(trueArgs);
+                
+                return result.ToString();
+            }
+            if (_userDefinedFunctions.TryGetValue(functionName, out var dynamicFunction))
+            {
+                EnterScope();
+                
+                for (int i = 0; i < trueArgs.Length; i++)
                 {
-                    var evaluatedArgs = args.Parameters.Select(EvaluateParameter).ToArray();
-                    args.Result = ExecuteUserDefinedFunction(userFunction, evaluatedArgs);
+                    SetVariable(dynamicFunction.Arguments[i], trueArgs[i]);
                 }
-                else if (_inbuiltFunctions.TryGetValue(name, out var inbuiltFunction))
+                
+                if (!GetValueOfToken(Interpret(dynamicFunction.Code, true), out object? result))
                 {
-                    var evaluatedArgs = args.Parameters.Select(EvaluateParameter).ToArray();
-                    args.Result = ExecuteInbuiltFunction(inbuiltFunction, evaluatedArgs);
+                    ExitScope();
+                    // if we can't get the value, return the original function call with processed arguments
+                    return $"{functionName}({argsString})";
                 }
-                else
-                {
-                    throw new Exception($"Function '{name}' is not defined.");
-                }
-            };
+                
+                ExitScope();
 
-            object result = expression.Evaluate();
-            return Convert.ToDouble(result);
+                return result.ToString();
+            }
+
+            // if the function is not found, return the original function call with processed arguments
+            return $"{functionName}({argsString})";
+        });
+    }
+    
+    private double? EvaluateMathematicalExpression(string input)
+    {
+        try
+        {
+            input = ReplaceInbuiltFunctionsWithValue(input);
+            double result = MathematicalEvaluator.Evaluate(input, _globalVariables);
+            return result;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error evaluating expression: {ex.Message}");
             return null;
         }
-    }
-
-    private object EvaluateParameter(object param)
-    {
-        if (param is NCalc.Expression nestedExpression)
-        {
-            return nestedExpression.Evaluate();
-        }
-        return param;
-    }
-
-    private object ExecuteUserDefinedFunction(DynamicFunction function, object[] args)
-    {
-        EnterScope();
-        try
-        {
-            for (int i = 0; i < args.Length; i++)
-            {
-                SetVariable(function.Arguments[i], args[i]);
-            }
-
-            string returnedValue = Interpret(function.Code, true);
-            if (function.IsVoid) return 0;
-            GetValueOfToken(returnedValue, out object? result);
-            return result ?? 0;
-        }
-        finally
-        {
-            ExitScope();
-        }
-    }
-
-    private static object ExecuteInbuiltFunction(Delegate function, object[] args)
-    {
-        // Cast the delegate to the correct type (Func<object[], object>)
-        if (function is Func<object[], object> typedFunction)
-        {
-            return typedFunction(args);
-        }
-        throw new Exception("Invalid inbuilt function type.");
     }
 
     #region Non-Static Inbuilts
@@ -686,6 +679,10 @@ public partial class Interpreter
 
                 return list[intStart..intEnd];
             
+            case "query":
+                List<object> queriedList = HandleQueryMethod(list, args[0]);
+                return queriedList;
+            
             case "join":
                 if (args.Length == 1 && GetValueOfToken(args[0], out value)) { return string.Join(value.ToString(), list); }
                 break;
@@ -704,6 +701,49 @@ public partial class Interpreter
                 return '[' + string.Join(", ", list.Select(x => x.ToString()).ToArray()) + ']';
         }
         return null;
+    }
+
+    private List<object> HandleQueryMethod(List<object> list, string query)
+    {
+        List<object> queriedList = new();
+
+        int colonIndex = query.IndexOf(':');
+        string elementVar = query[..colonIndex].Trim();
+        query = query[(colonIndex + 1)..].Trim();
+
+        foreach (object element in list)
+        {
+            string queryWithItem = query;
+        
+            // handle class instance property evaluations
+            while (queryWithItem.Contains('.'))
+            {
+                int dotIndex = queryWithItem.IndexOf('.');
+                int spaceIndex = queryWithItem.IndexOf(' ', dotIndex);
+                if (spaceIndex == -1) { spaceIndex = queryWithItem.Length; }
+            
+                string property = queryWithItem.Substring(dotIndex + 1, spaceIndex - dotIndex - 1);
+
+                if (element is DynamicClassInstance classInstance && classInstance.Properties.TryGetValue(property, out object? prop))
+                {
+                    queryWithItem = queryWithItem.Replace($"{elementVar}.{property}", prop.ToString());
+                }
+                else
+                {
+                    throw new Exception($"Error evaluating query on property '{property}'.");
+                }
+            }
+            
+            // this is used when the list does -not- contain any DynamicClassInstance
+            queryWithItem = queryWithItem.Replace(elementVar, element.ToString());
+        
+            if ((bool)EvaluateBooleanExpression(queryWithItem))
+            {
+                queriedList.Add(element);
+            }
+        }
+
+        return queriedList;
     }
 
     private object? HandleStringMethods(string str, string methodName, string[] args)
@@ -897,7 +937,7 @@ public partial class Interpreter
         };
     }
 
-    private void SkipElseIfElseBlocks(ref Queue<string> codeLines, ref int lineNumber)
+    private static void SkipElseIfElseBlocks(ref Queue<string> codeLines, ref int lineNumber)
     {
         while (codeLines.TryPeek(out string nextLine))
         {
@@ -1045,27 +1085,23 @@ public partial class Interpreter
                             }
                             
                             // inherit everything from parent class
-                            // yikes
-                            foreach (var prop in parentClassDef.Properties)
+                            // do a deep copy to ensure nothing is overriden in the parent class
+                            classDef = new ClassDefinition(parentClassDef.Parameters.Concat(classArgs).ToArray())
                             {
-                                classDef.Properties[prop.Key] = prop.Value;
-                            }
-                            for (int i = 0; i < parentClassDef.Parameters.Length; i++)
-                            {
-                                classDef.Parameters[i] = parentClassDef.Parameters[i];
-                            }
-                            foreach (var method in parentClassDef.Methods)
-                            {
-                                classDef.Methods[method.Key] = method.Value;
-                            }
-                            foreach (var get in parentClassDef.Getters)
-                            {
-                                classDef.Getters[get.Key] = get.Value;
-                            }
-                            foreach (var set in parentClassDef.Setters)
-                            {
-                                classDef.Setters[set.Key] = set.Value;
-                            }
+                                Properties = parentClassDef.Properties.ToDictionary(
+                                    entry => entry.Key,
+                                    entry => entry.Value),
+
+                                Methods = parentClassDef.Methods.ToDictionary(
+                                    entry => entry.Key,
+                                    entry => new DynamicFunction(entry.Value.Arguments, entry.Value.Code)),
+
+                                Getters = new Dictionary<string, string>(parentClassDef.Getters),
+
+                                Setters = parentClassDef.Setters.ToDictionary(
+                                    entry => entry.Key,
+                                    entry => (entry.Value.Item1, entry.Value.Item2))
+                            };
                         }
                         
                         while (classScope.Count > 0)
@@ -1107,8 +1143,7 @@ public partial class Interpreter
                                     string[] methodArgsArray = classMethodArgs.Split(',').Select(arg => arg.Trim()).ToArray();
                                     string methodCode = ParseCodeInCurlyBraces(ref classScope, ref lineNumber);
 
-                                    DynamicFunction dynamicFunction = new(methodArgsArray, methodCode,
-                                        !methodCode.Contains("\nreturn "));
+                                    DynamicFunction dynamicFunction = new(methodArgsArray, methodCode);
                                     
                                     classDef.Methods[classMethodName] = dynamicFunction;
                                     break;
@@ -1331,7 +1366,7 @@ public partial class Interpreter
                             args = functionInstruction[(indexOfOpenBrace + 1)..^1].Split(',').Select(arg => arg.Trim()).ToArray();
                             string functionCode = ParseCodeInCurlyBraces(ref codeLines, ref lineNumber);
 
-                            DynamicFunction dynamicFunction = new(args, functionCode, !functionCode.Contains("\nreturn "));
+                            DynamicFunction dynamicFunction = new(args, functionCode);
                             
                             _userDefinedFunctions[functionName] = dynamicFunction;
                            
@@ -1427,4 +1462,6 @@ public partial class Interpreter
 
     [GeneratedRegex(@"\{(\w+)\}")]
     private static partial Regex MyRegex();
+    [GeneratedRegex(@"(\w+)\s*\(((?:[^()]+|\((?<depth>)|\)(?<-depth>))*(?(depth)(?!)))\)")]
+    private static partial Regex MyRegex1();
 }

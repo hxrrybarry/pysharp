@@ -1,0 +1,31 @@
+class Animal(name) 
+{
+    var Name = name
+    
+    fn Speak(text)
+    {
+        print(f"{Name}: {text}")
+    }
+}
+
+class Dog(isAdored) : Animal 
+{
+    var IsAdored = isAdored
+    
+    fn Speak(text)
+    {
+        print(f"Woof! {text}")
+    }
+}
+
+
+var an = Animal("Chester")
+an.Speak("hi")
+
+var ashton = Dog("Ashton", true)
+ashton.Speak("hi")
+
+var x = ashton.Name
+print(x)
+
+an.Speak("test")
