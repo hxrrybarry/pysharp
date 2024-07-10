@@ -54,9 +54,7 @@ for (i = 0; i < amount; i + 1)
     print(lowerBound)
 }
 
-print("")
-
-var queried = randArray.query(x : x.Lower > 5 && x.Lower < 9)
+var queried = randArray.query(r: r.Lower > 5 && r.Lower < 9)
 
 var length = len(queried)
 for (i = 0; i < length; i + 1)

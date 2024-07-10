@@ -1,5 +1,6 @@
 namespace pysharp;
 
+// object[] represents args
 public static class StaticInbuilts
 {
     public static object Print(object[] args)
@@ -13,17 +14,14 @@ public static class StaticInbuilts
     public static object Stringify(object[] args)
     {
         object trueValue = args[0];
-        string stringValue = trueValue.ToString();
 
-        if (trueValue is List<object> list)
+        string stringValue = trueValue switch
         {
-            stringValue = '[' + string.Join(", ", list.Select(x => x.ToString()).ToArray()) + ']';
-        }
-        
-        else if (trueValue is Dictionary<object, object> dict)
-        {
-            stringValue = '{' + string.Join(", ", dict.Select(kv => $"{kv.Key}: {kv.Value}")) + '}';
-        }
+            List<object> list => '[' + string.Join(", ", list.Select(x => x.ToString()).ToArray()) + ']',
+            Dictionary<object, object> dict =>
+                '{' + string.Join(", ", dict.Select(kv => $"{kv.Key}: {kv.Value}")) + '}',
+            _ => trueValue.ToString()
+        };
 
         return stringValue;
     }
@@ -34,12 +32,13 @@ public static class StaticInbuilts
         {
             int delay = (int)args[0];
             string factor = (string)args[1];
+            
+            // seconds, minutes, hours
             switch (factor)
             {
                 case "s": delay *= 1000; break;
                 case "m": delay *= 60_000; break;
                 case "h": delay *= 3_600_000; break;
-                default: break;
             }
 
             Thread.Sleep(delay);

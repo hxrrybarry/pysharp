@@ -1,4 +1,5 @@
 ﻿using System.Linq.Dynamic.Core;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace pysharp;
@@ -10,7 +11,7 @@ namespace pysharp;
  * Line number is still askew
  */
 
-public readonly struct DynamicFunction(string[] arguments, string code)
+public readonly partial struct DynamicFunction(string[] arguments, string code)
 {
     public string[] Arguments { get; } = arguments;
     public string Code { get; } = code;
@@ -18,27 +19,29 @@ public readonly struct DynamicFunction(string[] arguments, string code)
     
     private static bool IsVoidFunction(string code)
     {
-        const string pattern = @"(?m)^(?!//)\s*return\s+\S";
-    
-        return !Regex.IsMatch(code, pattern, RegexOptions.IgnoreCase | RegexOptions.Multiline);
+        // attempts to find isolated "return" keyword to determine whether it is a void
+        return !MyRegex().IsMatch(code);
     }
+
+    [GeneratedRegex(@"(?m)^(?!//)\s*return\s+\S", RegexOptions.IgnoreCase | RegexOptions.Multiline, "en-GB")]
+    private static partial Regex MyRegex();
 }
 
-public struct ClassDefinition(string[] arguments)
+public readonly struct ClassDefinition(string[] arguments)
 {
-    public Dictionary<string, object?> Properties { get; set; } = new();
-    public Dictionary<string, DynamicFunction> Methods { get; set; } = new();
-    public Dictionary<string, string> Getters { get; set; } = new();
-    public Dictionary<string, (string, string)> Setters { get; set; } = new();
-    public string[] Parameters { get; set; } = arguments;
+    public Dictionary<string, object?> Properties { get; init; } = new();
+    public Dictionary<string, DynamicFunction> Methods { get; init; } = new();
+    public Dictionary<string, string> Getters { get; init; } = new();
+    public Dictionary<string, (string, string)> Setters { get; init; } = new();
+    public string[] Parameters { get; } = arguments;
 }
 
 public class DynamicClassInstance(ClassDefinition classDef)
 {
-    public Dictionary<string, object?> Properties { get; } = new Dictionary<string, object?>(classDef.Properties);
-    public Dictionary<string, DynamicFunction> Methods { get; } = new Dictionary<string, DynamicFunction>(classDef.Methods);
-    public Dictionary<string, string> Getters { get; } = new Dictionary<string, string>(classDef.Getters);
-    public Dictionary<string, (string, string)> Setters { get; } = new Dictionary<string, (string, string)>(classDef.Setters);
+    public Dictionary<string, object?> Properties { get; } = new(classDef.Properties);
+    public Dictionary<string, DynamicFunction> Methods { get; } = new(classDef.Methods);
+    public Dictionary<string, string> Getters { get; } = new(classDef.Getters);
+    public Dictionary<string, (string, string)> Setters { get; } = new(classDef.Setters);
 }
 
 public partial class Interpreter
@@ -78,6 +81,7 @@ public partial class Interpreter
         }
     }
 
+    // search through scope stack to get latest variable batch where the referenced var exists
     private bool TryGetVariable(string key, out object? value)
     {
         foreach (var scope in _scopeStack.Reverse())
@@ -245,18 +249,24 @@ public partial class Interpreter
 
     private string ReplacePlaceholders(string input)
     {
-        return MyRegex().Replace(input, match =>
+        StringBuilder result = new(input.Length);
+        int lastIndex = 0;
+        foreach (Match match in MyRegex().Matches(input))
         {
+            result.Append(input, lastIndex, match.Index - lastIndex);
             string key = match.Groups[1].Value;
             foreach (var scope in _scopeStack.Reverse())
             {
                 if (scope.TryGetValue(key, out object? value))
                 {
-                    return FormatValue(value);
+                    result.Append(FormatValue(value));
+                    break;
                 }
             }
-            return match.Value; // Keep original if not found
-        });
+            lastIndex = match.Index + match.Length;
+        }
+        result.Append(input, lastIndex, input.Length - lastIndex);
+        return result.ToString();
     }
 
     private static string? FormatValue(object value)
@@ -304,11 +314,14 @@ public partial class Interpreter
 
     private object? HandleListAccess(string givenVariableValue)
     {
+        // check if variable is a list
         if (!givenVariableValue.Contains('[') || !givenVariableValue.EndsWith(']')) { return null; }
         
+        // get variable name and find value
         string variableName = givenVariableValue[..givenVariableValue.IndexOf('[')];
         if (!TryGetVariable(variableName, out object? value) || value is not List<object>) { return null; }
 
+        // try to get integer index
         string attemptedIndex = givenVariableValue[(givenVariableValue.IndexOf('[') + 1)..^1];
         if (!GetValueOfToken(attemptedIndex, out object? index) || 
             !int.TryParse(index.ToString(), out int intIndex)) { return null; }
@@ -328,6 +341,7 @@ public partial class Interpreter
         EnterScope();
         try
         {
+            // check if method has any arguments, if not don't bother setting variables
             if (args.Length > 0)
             {
                 for (int i = 0; i < args.Length; i++)
@@ -335,16 +349,15 @@ public partial class Interpreter
                     SetVariable(methodDef.Arguments[i], args[i]);
                 }  
             }
-             
+            
+            // create instances of the class' properties in scope
             foreach (var prop in obj.Properties)
             {
                 SetVariable(prop.Key, prop.Value);
             }
-
-            string functionCode = methodDef.Code;
-
+            
             object? result = null;
-            string returnedResult = Interpret(functionCode, true, obj);
+            string returnedResult = Interpret(methodDef.Code, true, obj);
             if (!methodDef.IsVoid)
                 GetValueOfToken(returnedResult, out result);
 
@@ -358,19 +371,23 @@ public partial class Interpreter
     
     private void SetProperty(DynamicClassInstance obj, string propertyName, object value)
     {
+        // check if property exists
         if (!obj.Properties.ContainsKey(propertyName))
         {
             throw new Exception($"Property {propertyName} not found on object.");
         }
 
+        // check if a corresponding setter exists, if it does refer to that for new value
         if (obj.Setters.TryGetValue(propertyName, out (string, string) setterCode))
         {
             EnterScope();
+            // create instance of setter arg
             SetVariable(setterCode.Item1, value);
             
+            // no need to check for IsVoid here as a setter *should* always have a return
             if (!GetValueOfToken(Interpret(setterCode.Item2, true, obj), out value))
             {
-                throw new Exception($"Invalid return type for setter of class property {propertyName}");
+                throw new Exception($"Invalid return type for setter of class property '{propertyName}'.");
             }
 
             ExitScope();
@@ -379,13 +396,16 @@ public partial class Interpreter
         obj.Properties[propertyName] = value;
     }
     
+    // we do not need to enter a scope as a getter doesn't take an argument
     private object? GetProperty(DynamicClassInstance obj, string propertyName)
     {
         if (!obj.Properties.TryGetValue(propertyName, out object? value))
             throw new Exception($"Property {propertyName} not found on object.");
         
+        // refer to corresponding getter if one exists
         if (!obj.Getters.TryGetValue(propertyName, out string getterCode)) { return value; }
         
+        // again, no need to check for IsVoid here as a setter *should* always have a return
         if (!GetValueOfToken(Interpret(getterCode, true, obj), out value))
         {
             throw new Exception($"Invalid return type for getter of class property {propertyName}");
@@ -398,21 +418,23 @@ public partial class Interpreter
     {
         try
         {
+            // class instantiation
             if (tokens.Contains('(') && tokens.Contains(')'))
             {
                 string className = tokens[..tokens.IndexOf('(')];
                 string argsString = tokens[(tokens.IndexOf('(') + 1)..^1];
-                string[] argsArray = StaticHelpers.ParseArguments(argsString);
-                object[] args = new object[argsArray.Length];
+                string[] naiveArgs = StaticHelpers.ParseArguments(argsString);
+                object[] trueArgs = new object[naiveArgs.Length];
 
-                bool isValidArguments = !string.IsNullOrWhiteSpace(argsArray[0]);
+                bool isValidArguments = !string.IsNullOrWhiteSpace(naiveArgs[0]);
+                // class may not take any parameters in the constructor, in that case, skip
                 if (isValidArguments)
                 {
-                    for (int i = 0; i < argsArray.Length; i++)
+                    for (int i = 0; i < naiveArgs.Length; i++)
                     {
-                        if (!GetValueOfToken(argsArray[i], out args[i]))
+                        if (!GetValueOfToken(naiveArgs[i], out trueArgs[i]))
                         {
-                            throw new Exception($"Error parsing argument '{argsArray[i]}' for class '{className}'.");
+                            throw new Exception($"Error parsing argument '{naiveArgs[i]}' for class '{className}'.");
                         }
                     }
                 }
@@ -431,7 +453,7 @@ public partial class Interpreter
                         for (int i = 0; i < constructedProperties.Count; i++)
                         {
                             string key = constructedProperties.ElementAt(i).Key;
-                            dynamicClass.Properties[key] = args[i];
+                            dynamicClass.Properties[key] = trueArgs[i];
                         }
                     }
 
@@ -494,6 +516,7 @@ public partial class Interpreter
 
     private Dictionary<object, object>? HandleDictionaryAssignment(string givenVariableValue)
     {
+        // curly braces indicate it is a dictionary, if both aren't found, return null
         if (!givenVariableValue.Contains('{') || !givenVariableValue.EndsWith('}')) { return null; }
         
         givenVariableValue = givenVariableValue[(givenVariableValue.IndexOf('{') + 1)..^1];
@@ -517,6 +540,7 @@ public partial class Interpreter
     
     private object? HandleDictionaryLookup(string givenVariableValue)
     {
+        // square braces indicate access
         if (!givenVariableValue.Contains('[') || !givenVariableValue.EndsWith(']')) { return null; }
         
         string variableName = givenVariableValue[..givenVariableValue.IndexOf('[')];
@@ -569,6 +593,7 @@ public partial class Interpreter
         return trueVariableValue is not null;
     }
 
+    // method accessor for inbuilt data types
     private bool TryExecuteMethodFromTokens(string tokens, out object? trueVariableValue)
     {
         trueVariableValue = null;
@@ -706,9 +731,10 @@ public partial class Interpreter
     private List<object> HandleQueryMethod(List<object> list, string query)
     {
         List<object> queriedList = new();
-
+        
+        // item before the ':' will be the name of the referenced variable for querying
         int colonIndex = query.IndexOf(':');
-        string elementVar = query[..colonIndex].Trim();
+        string elementVarName = query[..colonIndex].Trim();
         query = query[(colonIndex + 1)..].Trim();
 
         foreach (object element in list)
@@ -716,26 +742,25 @@ public partial class Interpreter
             string queryWithItem = query;
         
             // handle class instance property evaluations
+            // go through each item with an accessor, and replace it with its respective value
             while (queryWithItem.Contains('.'))
             {
+                // we can acquire the token by parsing via accessor and space index
                 int dotIndex = queryWithItem.IndexOf('.');
                 int spaceIndex = queryWithItem.IndexOf(' ', dotIndex);
                 if (spaceIndex == -1) { spaceIndex = queryWithItem.Length; }
             
-                string property = queryWithItem.Substring(dotIndex + 1, spaceIndex - dotIndex - 1);
+                string propertyName = queryWithItem[(dotIndex + 1)..spaceIndex];
 
-                if (element is DynamicClassInstance classInstance && classInstance.Properties.TryGetValue(property, out object? prop))
-                {
-                    queryWithItem = queryWithItem.Replace($"{elementVar}.{property}", prop.ToString());
-                }
-                else
-                {
-                    throw new Exception($"Error evaluating query on property '{property}'.");
-                }
+                if (element is not DynamicClassInstance classInstance ||
+                    !classInstance.Properties.TryGetValue(propertyName, out object? prop))
+                { throw new Exception($"Error evaluating query on property '{propertyName}'."); }
+                
+                queryWithItem = queryWithItem.Replace($"{elementVarName}.{propertyName}", prop.ToString());
             }
             
             // this is used when the list does -not- contain any DynamicClassInstance
-            queryWithItem = queryWithItem.Replace(elementVar, element.ToString());
+            queryWithItem = queryWithItem.Replace(elementVarName, element.ToString());
         
             if ((bool)EvaluateBooleanExpression(queryWithItem))
             {
@@ -748,6 +773,7 @@ public partial class Interpreter
 
     private object? HandleStringMethods(string str, string methodName, string[] args)
     {
+        // we parse each argument directly upon method call
         switch (methodName)
         {
             case "upper":
@@ -796,6 +822,8 @@ public partial class Interpreter
 
         try
         {
+            // attempt to get variable type
+            // if none work, returning null indicates something went wrong
             switch (target)
             {
                 case List<object> var:
@@ -855,6 +883,7 @@ public partial class Interpreter
 
         if (_inbuiltFunctions.TryGetValue(referencedFunction, out var function))
         {
+            // cast to delegate and execute if a function is found
             var castedFunction = (Func<object[], object>)function;
             return castedFunction(trueArgs);
         }
@@ -864,12 +893,15 @@ public partial class Interpreter
             EnterScope();
             try
             {
+                // create local variables
                 for (int i = 0; i < trueArgs.Length; i++)
                 {
                     SetVariable(userDefinedFunction.Arguments[i], trueArgs[i]);
                 }
 
                 string returnedValue = Interpret(userDefinedFunction.Code, true);
+                // -ONLY- return something if the function -ISN'T- a void
+                // refer to DynamicFunction struct for void detection
                 if (!userDefinedFunction.IsVoid)
                     return GetValueOfToken(returnedValue, out object? result) ? result : 0;
             }
@@ -899,6 +931,7 @@ public partial class Interpreter
             string line = code.Dequeue().Trim();
             lineNumber++;
 
+            // if we encounter an open brace, it means we need to find another closing than previously indicated
             curlyBraceDepth += line switch
             {
                 "{" => 1,
@@ -976,7 +1009,8 @@ public partial class Interpreter
         }
     }
 
-    private string HandleElseIfBlock(string elseIfLine, ref Queue<string> codeLines, ref int lineNumber, bool isFromUserFunction, DynamicClassInstance? passedObj)
+    private void HandleElseIfBlock(string elseIfLine, ref Queue<string> codeLines, ref int lineNumber,
+        bool isFromUserFunction, DynamicClassInstance? passedObj)
     {
         string elseIfInstruction = elseIfLine[7..].Trim();
         if (!TryParseExpression(elseIfInstruction, out string expression))
@@ -990,15 +1024,18 @@ public partial class Interpreter
             throw new Exception($"Invalid boolean expression for else if statement: '{elseIfInstruction}'.");
         }
 
-        if (!evaluatedExpression) { return null; }
+        if (!evaluatedExpression)
+        {
+            return;
+        }
         SkipElseIfElseBlocks(ref codeLines, ref lineNumber);
-        return ExecuteScope(scope, isFromUserFunction, passedObj);
+        ExecuteScope(scope, isFromUserFunction, passedObj);
     }
 
-    private string HandleElseBlock(ref Queue<string> codeLines, ref int lineNumber, bool isFromUserFunction, DynamicClassInstance? passedObj)
+    private void HandleElseBlock(ref Queue<string> codeLines, ref int lineNumber, bool isFromUserFunction, DynamicClassInstance? passedObj)
     {
         string scope = ParseCodeInCurlyBraces(ref codeLines, ref lineNumber);
-        return ExecuteScope(scope, isFromUserFunction, passedObj);
+        ExecuteScope(scope, isFromUserFunction, passedObj);
     }
 
     private static bool TryParseExpression(string instruction, out string expression)
@@ -1012,7 +1049,7 @@ public partial class Interpreter
         return false;
     }
 
-    private string ExecuteScope(string scope, bool isFromUserFunction, DynamicClassInstance? passedObj)
+    private void ExecuteScope(string scope, bool isFromUserFunction, DynamicClassInstance? passedObj)
     {
         string error = Interpret(scope, isFromUserFunction, passedObj);
         if (error != "Code executed successfully." && !isFromUserFunction)
@@ -1020,8 +1057,7 @@ public partial class Interpreter
             throw new Exception(error);
         }
 
-        if (!isFromUserFunction) { return string.Empty; }
-        return error;
+        if (!isFromUserFunction) { return; }
     }
 
     private bool TryEvaluateBooleanExpression(string expression, out bool result)
@@ -1067,108 +1103,8 @@ public partial class Interpreter
                     case "class":
                         string classNameAndArgs = string.Join(' ', tokens);
                         string className = classNameAndArgs[..classNameAndArgs.IndexOf('(')];
-                        string[] classArgs = classNameAndArgs[(classNameAndArgs.IndexOf('(') + 1)..classNameAndArgs.IndexOf(')')].Split(',').Select(arg => arg.Trim()).ToArray();
 
-                        Queue<string> classScope = new(ParseCodeInCurlyBraces(ref codeLines, ref lineNumber).Split('\n'));
-
-                        ClassDefinition classDef = new(classArgs);
-                        
-                        // handle inheritance
-                        if (classNameAndArgs.Contains(':'))
-                        {
-                            string parentClassName = classNameAndArgs[(classNameAndArgs.IndexOf(':') + 1)..].Trim();
-
-                            if (!_userDefinedClasses.TryGetValue(parentClassName, out ClassDefinition parentClassDef))
-                            {
-                                throw new Exception(
-                                    $"Error at line: {lineNumber}. Parent class '{parentClassName}' does not exist.");
-                            }
-                            
-                            // inherit everything from parent class
-                            // do a deep copy to ensure nothing is overriden in the parent class
-                            classDef = new ClassDefinition(parentClassDef.Parameters.Concat(classArgs).ToArray())
-                            {
-                                Properties = parentClassDef.Properties.ToDictionary(
-                                    entry => entry.Key,
-                                    entry => entry.Value),
-
-                                Methods = parentClassDef.Methods.ToDictionary(
-                                    entry => entry.Key,
-                                    entry => new DynamicFunction(entry.Value.Arguments, entry.Value.Code)),
-
-                                Getters = new Dictionary<string, string>(parentClassDef.Getters),
-
-                                Setters = parentClassDef.Setters.ToDictionary(
-                                    entry => entry.Key,
-                                    entry => (entry.Value.Item1, entry.Value.Item2))
-                            };
-                        }
-                        
-                        while (classScope.Count > 0)
-                        {
-                            string classLine = classScope.Dequeue().Trim();
-                            lineNumber++;
-
-                            if (string.IsNullOrWhiteSpace(classLine) || classLine.StartsWith("//")) { continue; }
-
-                            Queue<string> classTokens = new(classLine.Split(' '));
-                            string classInstruction = classTokens.Dequeue();
-
-                            switch (classInstruction)
-                            {
-                                case "var":
-                                    string propName = classTokens.Dequeue();
-                                    classTokens.Dequeue(); // skip the '='
-                                    string propValue = string.Join(' ', classTokens);
-
-                                    object? truePropValue;
-                                    if (classArgs.Contains(propValue))
-                                    {
-                                        truePropValue = propValue;
-                                    }
-
-                                    else if (!GetValueOfToken(propValue, out truePropValue))
-                                    {
-                                        throw new Exception($"Error parsing property value for '{propName}' in class '{className}'.");
-                                    }
-
-                                    classDef.Properties[propName] = truePropValue;
-                                    break;
-
-                                case "fn":
-                                    string classMethod = string.Join(' ', classTokens);
-                                    int indexOfOpenBrace = classMethod.IndexOf('(');
-                                    string classMethodName = classMethod[..indexOfOpenBrace];
-                                    string classMethodArgs = classMethod[(indexOfOpenBrace + 1)..^1];
-                                    string[] methodArgsArray = classMethodArgs.Split(',').Select(arg => arg.Trim()).ToArray();
-                                    string methodCode = ParseCodeInCurlyBraces(ref classScope, ref lineNumber);
-
-                                    DynamicFunction dynamicFunction = new(methodArgsArray, methodCode);
-                                    
-                                    classDef.Methods[classMethodName] = dynamicFunction;
-                                    break;
-                                
-                                case "get":
-                                    string propertyName = classTokens.Dequeue();
-                                    string getMethodCode = ParseCodeInCurlyBraces(ref classScope, ref lineNumber);
-                                    classDef.Getters[propertyName] = getMethodCode;
-
-                                    break;
-                                
-                                case "set":
-                                    string setterMethod = string.Join(' ', classTokens);
-                                    indexOfOpenBrace = setterMethod.IndexOf('(');
-                                    propertyName = setterMethod[..indexOfOpenBrace];
-                                    string setterMethodArg = setterMethod[(indexOfOpenBrace + 1)..^1];
-                                    string setMethodCode = ParseCodeInCurlyBraces(ref classScope, ref lineNumber);
-                                    classDef.Setters[propertyName] = (setterMethodArg, setMethodCode);
-
-                                    break;
-
-                                default:
-                                    throw new Exception($"Unrecognized instruction '{classInstruction}' in class '{className}'.");
-                            }
-                        }
+                        ClassDefinition classDef = GetClassDefinition(className, classNameAndArgs, ref codeLines, ref lineNumber);
 
                         _userDefinedClasses[className] = classDef;
                         break;
@@ -1458,6 +1394,119 @@ public partial class Interpreter
         }
 
         return "Code executed successfully.";
+    }
+
+    private ClassDefinition GetClassDefinition(string classNameAndArgs, string className, ref Queue<string> codeLines, ref int lineNumber)
+    {
+        string[] classArgs = classNameAndArgs[(classNameAndArgs.IndexOf('(') + 1)..classNameAndArgs.IndexOf(')')].Split(',').Select(arg => arg.Trim()).ToArray();
+
+        Queue<string> classScope = new(ParseCodeInCurlyBraces(ref codeLines, ref lineNumber).Split('\n'));
+
+        ClassDefinition classDef = new(classArgs);
+        
+        // handle inheritance
+        if (classNameAndArgs.Contains(':'))
+        {
+            string parentClassName = classNameAndArgs[(classNameAndArgs.IndexOf(':') + 1)..].Trim();
+
+            if (!_userDefinedClasses.TryGetValue(parentClassName, out ClassDefinition parentClassDef))
+            {
+                throw new Exception(
+                    $"Error at line: {lineNumber}. Parent class '{parentClassName}' does not exist.");
+            }
+            
+            // inherit everything from parent class
+            // do a deep copy to ensure nothing is overriden in the parent class
+            classDef = new ClassDefinition(parentClassDef.Parameters.Concat(classArgs).ToArray())
+            {
+                Properties = parentClassDef.Properties.ToDictionary(
+                    entry => entry.Key,
+                    entry => entry.Value),
+
+                Methods = parentClassDef.Methods.ToDictionary(
+                    entry => entry.Key,
+                    entry => new DynamicFunction(entry.Value.Arguments, entry.Value.Code)),
+
+                Getters = new Dictionary<string, string>(parentClassDef.Getters),
+
+                Setters = parentClassDef.Setters.ToDictionary(
+                    entry => entry.Key,
+                    entry => (entry.Value.Item1, entry.Value.Item2))
+            };
+        }
+        
+        while (classScope.Count > 0)
+        {
+            string classLine = classScope.Dequeue().Trim();
+            lineNumber++;
+
+            if (string.IsNullOrWhiteSpace(classLine) || classLine.StartsWith("//")) { continue; }
+
+            Queue<string> classTokens = new(classLine.Split(' '));
+            string classInstruction = classTokens.Dequeue();
+
+            switch (classInstruction)
+            {
+                // property declaration
+                case "var":
+                    string propName = classTokens.Dequeue();
+                    classTokens.Dequeue(); // skip the '='
+                    string propValue = string.Join(' ', classTokens);
+
+                    object? truePropValue;
+                    if (classArgs.Contains(propValue))
+                    {
+                        truePropValue = propValue;
+                    }
+
+                    else if (!GetValueOfToken(propValue, out truePropValue))
+                    {
+                        throw new Exception($"Error parsing property value for '{propName}' in class '{className}'.");
+                    }
+
+                    classDef.Properties[propName] = truePropValue;
+                    break;
+                
+                // method declaration
+                case "fn":
+                    string classMethod = string.Join(' ', classTokens);
+                    int indexOfOpenBrace = classMethod.IndexOf('(');
+                    string classMethodName = classMethod[..indexOfOpenBrace];
+                    string classMethodArgs = classMethod[(indexOfOpenBrace + 1)..^1];
+                    string[] methodArgsArray = classMethodArgs.Split(',').Select(arg => arg.Trim()).ToArray();
+                    string methodCode = ParseCodeInCurlyBraces(ref classScope, ref lineNumber);
+
+                    DynamicFunction dynamicFunction = new(methodArgsArray, methodCode);
+                    
+                    classDef.Methods[classMethodName] = dynamicFunction;
+                    break;
+                
+                // getter declaration
+                case "get":
+                    string propertyName = classTokens.Dequeue();
+                    string getMethodCode = ParseCodeInCurlyBraces(ref classScope, ref lineNumber);
+                    classDef.Getters[propertyName] = getMethodCode;
+
+                    break;
+                
+                // setter declaration
+                case "set":
+                    string setterMethod = string.Join(' ', classTokens);
+                    indexOfOpenBrace = setterMethod.IndexOf('(');
+                    propertyName = setterMethod[..indexOfOpenBrace];
+                    string setterMethodArg = setterMethod[(indexOfOpenBrace + 1)..^1];
+                    string setMethodCode = ParseCodeInCurlyBraces(ref classScope, ref lineNumber);
+                    classDef.Setters[propertyName] = (setterMethodArg, setMethodCode);
+
+                    break;
+                
+                // unrecognized token
+                default:
+                    throw new Exception($"Unrecognized instruction '{classInstruction}' in class '{className}'.");
+            }
+        }
+
+        return classDef;
     }
 
     [GeneratedRegex(@"\{(\w+)\}")]

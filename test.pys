@@ -1,31 +1,13 @@
-class Animal(name) 
+fn Pow(a, n)
 {
-    var Name = name
-    
-    fn Speak(text)
+    n = n - 1
+    var stored = a
+    for (i = 0; i < n; i + 1)
     {
-        print(f"{Name}: {text}")
+        a = a * stored
     }
+    return a
 }
 
-class Dog(isAdored) : Animal 
-{
-    var IsAdored = isAdored
-    
-    fn Speak(text)
-    {
-        print(f"Woof! {text}")
-    }
-}
-
-
-var an = Animal("Chester")
-an.Speak("hi")
-
-var ashton = Dog("Ashton", true)
-ashton.Speak("hi")
-
-var x = ashton.Name
+var x = 5328 % 38
 print(x)
-
-an.Speak("test")
