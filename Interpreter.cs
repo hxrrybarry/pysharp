@@ -963,9 +963,9 @@ public partial class Interpreter
             { "input", new Func<object[], object>(Input) },
             { "len", new Func<object[], object>(StaticInbuilts.Length) },
             { "stringify", new Func<object[], object>(StaticInbuilts.Stringify) },
-            { "randint", new Func<object[], object>(StaticInbuilts.RandomInt)},
-            { "ReadFile", new Func<object[], object>(StaticInbuilts.ReadFile) },
-            { "WriteFile", new Func<object[], object>(StaticInbuilts.WriteFile) },
+            { "rand_int", new Func<object[], object>(StaticInbuilts.RandomInt)},
+            { "read_file", new Func<object[], object>(StaticInbuilts.ReadFile) },
+            { "write_file", new Func<object[], object>(StaticInbuilts.WriteFile) },
             { "deref", new Func<object[], object>(Dereference) }
         };
     }
